@@ -196,6 +196,9 @@ for (const l of planned.lines) {
       pixelOffset: new C.Cartesian2(10, 0), disableDepthTestDistance: Infinity, distanceDisplayCondition: new C.DistanceDisplayCondition(0, 60000) });
   }
 }
+for (const m of planned.models)
+  gltf(`assets/${m.file}`, { modelMatrix: frame(m.lon, m.lat, m.h, m.bearing),
+    distanceDisplayCondition: new C.DistanceDisplayCondition(0, 40000) }).then((mdl) => plannedLayer.add(mdl));
 
 // ---------------- simulated trains ----------------
 const TRAIN_MODEL = { tube: 'train_tube', 'elizabeth-line': 'train_rail', overground: 'train_rail', 'national-rail': 'train_rail', dlr: 'train_dlr', tram: 'train_tram', 'cable-car': 'gondola' };
@@ -283,7 +286,11 @@ document.querySelectorAll('input[name=speed]').forEach((r) => r.addEventListener
 
 let buildings = null;
 on('t-buildings', async (v) => {
-  if (v && !buildings) buildings = scene.primitives.add(await C.createOsmBuildingsAsync());
+  if (v && !buildings) {
+    buildings = scene.primitives.add(await C.createOsmBuildingsAsync());
+    // hide OSM buildings inside the Old Oak Common model footprint (~400 x 250 m)
+    buildings.style = new C.Cesium3DTileStyle({ show: '!(${feature["cesium#latitude"]} > 51.5225 && ${feature["cesium#latitude"]} < 51.5275 && ${feature["cesium#longitude"]} > -0.2530 && ${feature["cesium#longitude"]} < -0.2430)' });
+  }
   if (buildings) buildings.show = v;
 });
 on('t-underground', (v) => {
