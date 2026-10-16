@@ -84,6 +84,7 @@ section { padding: 10px 14px; border-bottom: 1px solid var(--rule); }
 #card li { padding: 2px 10px; border-radius: 3px; color: #fff; font-size: 14px; font-weight: 500; background: var(--c); }
 #card li.light { color: var(--ink); }
 #card { max-height: calc(100% - 32px); display: flex; flex-direction: column; }
+#card[hidden] { display: none; }
 #card .times { border-top: 1px solid var(--rule); padding: 10px 16px 12px; overflow-y: auto; }
 #card .times h3 { margin: 0 0 6px; font-size: 15px; font-weight: 600; }
 #card #card-times { padding: 0; gap: 0; }
