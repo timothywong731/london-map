@@ -10,6 +10,7 @@ export const MODES = {
   tram: 'Trams',
   'cable-car': 'Cable car',
   'national-rail': 'National Rail',
+  planned: 'Planned (not yet built)',
 };
 
 const tube = (id, name, colour, depth, re) => ({ id, name, mode: 'tube', colour, depth, osm: re, route: /^subway$/ });
@@ -59,4 +60,46 @@ export const OPERATORS = [
   nr('west-midlands-trains', 'London Northwestern', '#FF8300', /West Midlands|London Northwestern/i),
   nr('lumo', 'Lumo', '#2B6EF5', /Lumo/i),
   nr('grand-central', 'Grand Central', '#1D1D1B', /Grand Central/i),
+];
+
+// Planned railways (phase 2) — drawn dashed, never in journey times or train animation.
+// Stops without lon/lat are existing stations (looked up by name in data/stations.json);
+// coordinates of new stations are from OSM construction sites / TfL WLO material (approximate).
+export const PLANNED = [
+  {
+    id: 'hs2', name: 'HS2', mode: 'planned', colour: '#005F83', width: 5, // ponytail: HS2 brand colour unconfirmed (design system offline) — change here
+    opens: 'Planned — opening 2036–39 (Euston 2040–43)',
+    osm: { select: 'way["railway"="construction"]', bbox: { s: 51.48, w: -1.95, n: 52.76, e: -0.12 } },
+    stops: [
+      { name: 'Euston', hs2Lon: -0.1355, hs2Lat: 51.5300 },
+      { name: 'Old Oak Common', lon: -0.24798, lat: 51.52493, also: ['elizabeth', 'great-western-railway'] },
+      { name: 'Birmingham Interchange', lon: -1.70067, lat: 52.45209 },
+      { name: 'Birmingham Curzon Street', lon: -1.88964, lat: 52.48046 },
+    ],
+    // Delta Junction (Water Orton) north to the West Coast Main Line at Handsacre
+    branches: [[
+      { name: 'Delta Junction', lon: -1.7345, lat: 52.5155, waypoint: true },
+      { name: 'Handsacre Junction', lon: -1.8205, lat: 52.7302, waypoint: true },
+    ]],
+  },
+  {
+    id: 'west-london-orbital', name: 'West London Orbital', mode: 'planned', colour: '#EF7B10', width: 3.5,
+    opens: 'Proposed — opening early-to-mid 2030s',
+    osm: { select: 'way["railway"="rail"][!"service"]', bbox: { s: 51.44, w: -0.39, n: 51.60, e: -0.20 } },
+    stops: [
+      { name: 'Hendon' },
+      { name: 'Brent Cross West' },
+      { name: 'Neasden', lon: -0.24738, lat: 51.55320 },   // new, on the Dudding Hill line
+      { name: 'Harlesden', lon: -0.25652, lat: 51.54139 }, // new, on the Dudding Hill line
+      { name: 'Old Oak Common Lane', lon: -0.25387, lat: 51.52518 },
+      { name: 'Acton Central' },
+      { name: 'South Acton' },
+      { name: 'Lionel Road', lon: -0.29135, lat: 51.49061 },
+      { name: 'Brentford' },
+      { name: 'Syon Lane' },
+      { name: 'Isleworth' },
+      { name: 'Hounslow' },
+    ],
+    branches: [],
+  },
 ];

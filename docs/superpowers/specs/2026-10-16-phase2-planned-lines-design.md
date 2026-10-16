@@ -62,12 +62,11 @@ Colours:
 
 ### Output
 
-- `data/lines.json` gains the two planned lines.
-- `data/stations.json` gains:
-  - planned-only stations, with `planned: true`;
-  - a `plannedLines` list on existing stations that a planned line serves (for example Euston,
-    Hendon and Hounslow).
-- `data/graph.json` does **not** include planned lines, so journey times stay "today's network".
+- `data/planned.json` (new): `{ lines, stations, models }`, written by `scripts/build-planned.mjs`.
+  `lines.json`, `stations.json` and `graph.json` are unchanged — planned data lives apart so it can
+  never enter journey times (graph indices are positional over stations.json).
+- Planned stations at an existing station carry `existing: <station id>` so the card can add a
+  "(planned)" chip there.
 
 ## App (app.js, index.html, style.css)
 
