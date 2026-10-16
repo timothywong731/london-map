@@ -159,6 +159,44 @@ const NEAR = 6000;
   }
 }
 
+// ---------------- planned lines (phase 2): dashed, hollow-ring stations, never in journey times ----------------
+const plannedLayer = scene.primitives.add(new C.PrimitiveCollection());
+const plannedPrims = new Map();
+const plannedByStation = new Map(); // existing station id -> planned stations there (for card chips)
+const plannedById = new Map(planned.lines.map((l) => [l.id, l]));
+for (const l of planned.lines) {
+  const group = plannedLayer.add(new C.PrimitiveCollection());
+  for (const t of [0, 1]) {
+    const segs = l.segs.filter((s) => s.t === t && s.c.length >= 6);
+    if (!segs.length) continue;
+    group.add(new C.Primitive({
+      geometryInstances: segs.map((s) => new C.GeometryInstance({ geometry: new C.PolylineGeometry({
+        positions: C.Cartesian3.fromDegreesArrayHeights(s.c), width: l.width, arcType: C.ArcType.NONE,
+        vertexFormat: C.PolylineMaterialAppearance.VERTEX_FORMAT }) })),
+      appearance: new C.PolylineMaterialAppearance({ material: C.Material.fromType('PolylineDash', {
+        color: css(l.colour).withAlpha(t ? 0.5 : 1), gapColor: C.Color.TRANSPARENT, dashLength: 20 }) }),
+    }));
+  }
+  plannedPrims.set(l.id, group);
+}
+{
+  const rings = plannedLayer.add(new C.PointPrimitiveCollection());
+  const labels = plannedLayer.add(new C.LabelCollection({ scene }));
+  for (const st of planned.stations) {
+    st.planned = true;
+    if (st.existing) {
+      if (!plannedByStation.has(st.existing)) plannedByStation.set(st.existing, []);
+      plannedByStation.get(st.existing).push(st);
+    }
+    const col = css(plannedById.get(st.lines[0]).colour), pos = C.Cartesian3.fromDegrees(st.lon, st.lat, st.h + 4);
+    rings.add({ id: st, position: pos, pixelSize: 11, color: C.Color.WHITE.withAlpha(0.01), outlineColor: col, outlineWidth: 3,
+      disableDepthTestDistance: Infinity, distanceDisplayCondition: new C.DistanceDisplayCondition(0, 3e5) });
+    if (!st.existing) labels.add({ id: st, position: pos, text: st.name, font: 'italic 500 14px Jost, sans-serif', fillColor: C.Color.WHITE,
+      outlineColor: css('#1D1D1B'), outlineWidth: 3, style: C.LabelStyle.FILL_AND_OUTLINE, horizontalOrigin: C.HorizontalOrigin.LEFT,
+      pixelOffset: new C.Cartesian2(10, 0), disableDepthTestDistance: Infinity, distanceDisplayCondition: new C.DistanceDisplayCondition(0, 60000) });
+  }
+}
+
 // ---------------- simulated trains ----------------
 const TRAIN_MODEL = { tube: 'train_tube', 'elizabeth-line': 'train_rail', overground: 'train_rail', 'national-rail': 'train_rail', dlr: 'train_dlr', tram: 'train_tram', 'cable-car': 'gondola' };
 const SPEED = { tube: 9, 'elizabeth-line': 14, overground: 11, 'national-rail': 18, dlr: 8, tram: 6, 'cable-car': 5 }; // m/s, average incl. stops
@@ -235,6 +273,7 @@ const on = (id, fn) => $(id).addEventListener('change', (e) => fn(e.target.check
 
 on('t-zones', (v) => (zoneLayer.show = v));
 on('t-stations', (v) => (stationLayer.show = v));
+on('t-planned', (v) => { plannedLayer.show = v; scene.requestRender(); });
 on('t-trains', (v) => {
   if (v && !trainLayer) buildTrains();
   if (trainLayer) trainLayer.show = v;
@@ -264,7 +303,7 @@ $('collapse').addEventListener('click', () => {
 // key: one bar per line, grouped by mode
 const key = $('key');
 for (const [mode, label] of Object.entries(MODES)) {
-  const group = lines.filter((l) => l.mode === mode && linePrims.has(l.id));
+  const group = [...lines, ...planned.lines].filter((l) => l.mode === mode && (linePrims.has(l.id) || plannedPrims.has(l.id)));
   if (!group.length) continue;
   const sec = document.createElement('section');
   sec.className = 'mode' + (mode === 'national-rail' ? ' rail' : '');
@@ -272,7 +311,7 @@ for (const [mode, label] of Object.entries(MODES)) {
   const bars = group.map((l) => {
     const b = document.createElement('button');
     b.type = 'button';
-    b.className = 'bar' + (isLight(l.colour) ? ' light' : '');
+    b.className = 'bar' + (isLight(l.colour) ? ' light' : '') + (l.mode === 'planned' ? ' planned' : '');
     b.style.setProperty('--c', l.colour);
     b.textContent = l.name;
     b.setAttribute('aria-pressed', 'true');
@@ -289,7 +328,7 @@ for (const [mode, label] of Object.entries(MODES)) {
   key.appendChild(sec);
 }
 function setLine(id, bar, show) {
-  linePrims.get(id).show = show;
+  (linePrims.get(id) || plannedPrims.get(id)).show = show;
   bar.setAttribute('aria-pressed', String(show));
 }
 
@@ -343,7 +382,27 @@ async function drawReachableArea(times, from) {
 }
 const fmt = (m) => (m < 60 ? `${Math.round(m)} min` : `${Math.floor(m / 60)} h ${String(Math.round(m % 60)).padStart(2, '0')}`);
 
+const plannedChip = (id) => {
+  const l = plannedById.get(id) || byId.get(id), li = document.createElement('li');
+  li.textContent = `${l?.name || id} (planned)`;
+  li.className = 'planned';
+  li.style.setProperty('--c', l?.colour || '#777');
+  return li;
+};
+// Planned-only station: badge + opening text, no journey times (they cover today's network only)
+function selectPlanned(st, fly) {
+  clearSelection();
+  $('card-name').textContent = st.name;
+  $('card-zone').innerHTML = '<span class="badge">Planned</span> ';
+  $('card-zone').append(st.opens);
+  $('card-lines').replaceChildren(...st.lines.map(plannedChip), ...st.also.map(plannedChip));
+  $('card-times').closest('.times').hidden = true;
+  $('card').hidden = false;
+  if (fly) viewer.camera.flyTo({ destination: C.Cartesian3.fromDegrees(st.lon, st.lat - 0.16, 16000), orientation: { heading: 0, pitch: deg(-45), roll: 0 }, duration: 1.5 });
+}
+
 function selectStation(st, fly = false) {
+  if (st.planned && !st.existing) return selectPlanned(st, fly);
   $('card-name').textContent = st.name;
   $('card-zone').textContent = st.zones.length ? `Zone ${st.zones.join('/')}` : 'Outside the fare zones';
   $('card-lines').replaceChildren(...st.lines.map((id) => {
@@ -353,6 +412,8 @@ function selectStation(st, fly = false) {
     if (l && isLight(l.colour)) li.className = 'light';
     return li;
   }));
+  for (const p of plannedByStation.get(st.id) || []) $('card-lines').append(...p.lines.map(plannedChip));
+  $('card-times').closest('.times').hidden = false;
   $('card').hidden = false;
   if (fly) viewer.camera.flyTo({ destination: C.Cartesian3.fromDegrees(st.lon, st.lat - 0.16, 16000), orientation: { heading: 0, pitch: deg(-45), roll: 0 }, duration: 1.5 });
 
@@ -429,7 +490,8 @@ function showTip(p) {
 }
 const handler = new C.ScreenSpaceEventHandler(scene.canvas);
 handler.setInputAction((e) => {
-  const st = scene.pick(e.position)?.id;
+  let st = scene.pick(e.position)?.id;
+  if (st?.planned && st.existing) st = stations.find((s) => s.id === st.existing); // e.g. Euston: today's station + planned chip
   if (st?.lines) selectStation(st);
   else showTip(e.position);
 }, C.ScreenSpaceEventType.LEFT_CLICK);
@@ -440,6 +502,7 @@ scene.canvas.addEventListener('mouseleave', () => { tip.hidden = true; });
 // station search: native datalist over unique station names
 const byName = new Map();
 for (const st of stations) if (!byName.has(st.name)) byName.set(st.name, st);
+for (const st of planned.stations) if (!st.existing && !byName.has(st.name)) byName.set(st.name, st);
 $('station-list').append(...[...byName.keys()].sort().map((n) => Object.assign(document.createElement('option'), { value: n })));
 $('station-search').addEventListener('change', (e) => {
   const st = byName.get(e.target.value.trim());
