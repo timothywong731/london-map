@@ -24,6 +24,11 @@
       </button>
     </header>
     <div id="panel-body">
+      <section class="search">
+        <label for="station-search">Journey times from a station</label>
+        <input id="station-search" type="search" list="station-list" placeholder="Type a station name" autocomplete="off">
+        <datalist id="station-list"></datalist>
+      </section>
       <section class="trains">
         <label class="switch"><input type="checkbox" id="t-trains"><span>Trains</span></label>
         <div class="speed" role="radiogroup" aria-label="Train speed">
@@ -35,7 +40,6 @@
       <section class="toggles">
         <label class="switch"><input type="checkbox" id="t-zones" checked><span>Fare zones</span></label>
         <label class="switch"><input type="checkbox" id="t-stations" checked><span>Stations</span></label>
-        <label class="switch"><input type="checkbox" id="t-terminals" checked><span>Terminal landmarks</span></label>
         <label class="switch"><input type="checkbox" id="t-buildings"><span>3D buildings</span></label>
         <label class="switch"><input type="checkbox" id="t-underground"><span>See underground</span></label>
       </section>
@@ -51,6 +55,11 @@
     <h2 id="card-name"></h2>
     <p id="card-zone"></p>
     <ul id="card-lines"></ul>
+    <section class="times" aria-label="Journey times">
+      <h3>Journey times from here</h3>
+      <ul id="card-times"></ul>
+      <p class="hint">Estimated, including typical waits and changes.</p>
+    </section>
   </article>
 
   <div id="loading" role="status">Loading the network…</div>

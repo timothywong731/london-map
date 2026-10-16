@@ -2,3 +2,4 @@ node_modules/
 .cache/
 .playwright-mcp/
 *.blend1
+config.js

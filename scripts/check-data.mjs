@@ -1,10 +1,10 @@
 // Sanity checks on the baked data. Run: npm run check
 import fs from 'node:fs';
 import assert from 'node:assert/strict';
-import { LINES, OPERATORS, TERMINALS } from '../lines.js';
+import { LINES, OPERATORS } from '../lines.js';
 
 const read = (f) => JSON.parse(fs.readFileSync(`data/${f}.json`, 'utf8'));
-const lines = read('lines'), stations = read('stations'), zones = read('zones'), terminals = read('terminals');
+const lines = read('lines'), stations = read('stations'), zones = read('zones');
 
 for (const def of LINES) {
   const l = lines.find((x) => x.id === def.id);
@@ -26,7 +26,5 @@ for (const z of [1, 2, 3, 4, 5, 6]) {
 const named = (n) => stations.find((s) => s.name === n);
 assert.deepEqual(named('Oxford Circus').zones, [1]);
 assert.ok(named('Stratford').lines.length >= 5, 'Stratford is an interchange');
-assert.equal(terminals.length, TERMINALS.length);
-for (const t of terminals) assert.ok(fs.existsSync(`assets/terminal_${t.model}.glb`), `model for ${t.id}`);
 
-console.log(`ok: ${lines.length} lines, ${stations.length} stations, ${zones.length} zones, ${terminals.length} terminals`);
+console.log(`ok: ${lines.length} lines, ${stations.length} stations, ${zones.length} zones`);

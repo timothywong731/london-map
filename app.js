@@ -1,5 +1,7 @@
 import { MODES } from './lines.js';
-import { ION_TOKEN } from './config.js';
+import { BANDS, buildNetwork, travelTimes } from './journey.js';
+// config.js is gitignored: local copy for dev, written from a repo secret by the Pages workflow.
+const { ION_TOKEN } = await import('./config.js').catch(() => ({}));
 
 const C = window.Cesium;
 if (ION_TOKEN) C.Ion.defaultAccessToken = ION_TOKEN;
@@ -32,8 +34,8 @@ function frame(lon, lat, h, bearing) {
 }
 const gltf = (url, opts) => C.Model.fromGltfAsync({ url, upAxis: C.Axis.Y, forwardAxis: C.Axis.X, ...opts });
 
-const [lines, stations, zones, terminals] = await Promise.all(
-  ['lines', 'stations', 'zones', 'terminals'].map((f) => fetch(`data/${f}.json`).then((r) => r.json())),
+const [lines, stations, zones, graph] = await Promise.all(
+  ['lines', 'stations', 'zones', 'graph'].map((f) => fetch(`data/${f}.json`).then((r) => r.json())),
 );
 const byId = new Map(lines.map((l) => [l.id, l]));
 
@@ -156,17 +158,6 @@ const NEAR = 6000;
   }
 }
 
-// ---------------- terminal landmarks (Blender) ----------------
-const terminalLayer = new C.PrimitiveCollection();
-scene.primitives.add(terminalLayer);
-for (const t of terminals) {
-  gltf(`assets/terminal_${t.model}.glb`, {
-    id: { terminal: t }, modelMatrix: frame(t.lon, t.lat, t.h, t.heading),
-    heightReference: C.HeightReference.CLAMP_TO_GROUND, scene,
-    distanceDisplayCondition: new C.DistanceDisplayCondition(0, 40000),
-  }).then((m) => terminalLayer.add(m));
-}
-
 // ---------------- simulated trains ----------------
 const TRAIN_MODEL = { tube: 'train_tube', 'elizabeth-line': 'train_rail', overground: 'train_rail', 'national-rail': 'train_rail', dlr: 'train_dlr', tram: 'train_tram', 'cable-car': 'gondola' };
 const SPEED = { tube: 9, 'elizabeth-line': 14, overground: 11, 'national-rail': 18, dlr: 8, tram: 6, 'cable-car': 5 }; // m/s, average incl. stops
@@ -243,7 +234,6 @@ const on = (id, fn) => $(id).addEventListener('change', (e) => fn(e.target.check
 
 on('t-zones', (v) => (zoneLayer.show = v));
 on('t-stations', (v) => (stationLayer.show = v));
-on('t-terminals', (v) => (terminalLayer.show = v));
 on('t-trains', (v) => {
   if (v && !trainLayer) buildTrains();
   if (trainLayer) trainLayer.show = v;
@@ -302,16 +292,15 @@ function setLine(id, bar, show) {
   bar.setAttribute('aria-pressed', String(show));
 }
 
-// station card
-const handler = new C.ScreenSpaceEventHandler(scene.canvas);
-handler.setInputAction((e) => {
-  const picked = scene.pick(e.position);
-  let st = picked?.id;
-  if (st?.terminal) {
-    const t = st.terminal;
-    st = stations.reduce((a, s) => ((s.lon - t.lon) ** 2 + (s.lat - t.lat) ** 2 < (a.lon - t.lon) ** 2 + (a.lat - t.lat) ** 2 ? s : a));
-  }
-  if (!st?.lines) return ($('card').hidden = true);
+// ---------------- station card + journey times ----------------
+const net = buildNetwork(graph, stations, (id) => byId.get(id)?.mode);
+const stationIndex = new Map(stations.map((st, i) => [st, i]));
+const isoLayer = scene.primitives.add(new C.PrimitiveCollection());
+const isoDots = isoLayer.add(new C.PointPrimitiveCollection());
+const isoLabels = isoLayer.add(new C.LabelCollection({ scene }));
+const fmt = (m) => (m < 60 ? `${Math.round(m)} min` : `${Math.floor(m / 60)} h ${String(Math.round(m % 60)).padStart(2, '0')}`);
+
+function selectStation(st, fly = false) {
   $('card-name').textContent = st.name;
   $('card-zone').textContent = st.zones.length ? `Zone ${st.zones.join('/')}` : 'Outside the fare zones';
   $('card-lines').replaceChildren(...st.lines.map((id) => {
@@ -322,8 +311,62 @@ handler.setInputAction((e) => {
     return li;
   }));
   $('card').hidden = false;
+  if (fly) viewer.camera.flyTo({ destination: C.Cartesian3.fromDegrees(st.lon, st.lat - 0.16, 16000), orientation: { heading: 0, pitch: deg(-45), roll: 0 }, duration: 1.5 });
+
+  // every station reachable within the last band gets a dot in its band colour
+  const origin = stationIndex.get(st), times = travelTimes(net, origin);
+  isoDots.removeAll(); isoLabels.removeAll();
+  stationLayer.show = false; // plain markers would read as the palest band
+  const groups = BANDS.map(() => []);
+  stations.forEach((s, i) => {
+    const t = times[i], b = BANDS.findIndex((x) => t <= x.max);
+    if (b < 0) return;
+    if (i !== origin) groups[b].push([t, s]);
+    const pos = C.Cartesian3.fromDegrees(s.lon, s.lat, s.h + 6);
+    isoDots.add({ id: s, position: pos, pixelSize: i === origin ? 16 : 10, color: i === origin ? C.Color.WHITE : css(BANDS[b].colour),
+      outlineColor: i === origin ? css('#DA291C') : C.Color.WHITE, outlineWidth: i === origin ? 4 : 2, disableDepthTestDistance: Infinity });
+    if (i !== origin) isoLabels.add({ position: pos, text: fmt(t), font: '500 12px Jost, sans-serif', fillColor: C.Color.WHITE,
+      outlineColor: css('#1D1D1B'), outlineWidth: 3, style: C.LabelStyle.FILL_AND_OUTLINE, pixelOffset: new C.Cartesian2(0, 14),
+      disableDepthTestDistance: Infinity, distanceDisplayCondition: new C.DistanceDisplayCondition(0, 7000) });
+  });
+  $('card-times').replaceChildren(...BANDS.map((band, b) => {
+    const list = groups[b].sort((x, y) => x[0] - y[0]);
+    const prev = b ? BANDS[b - 1].max : 0;
+    const li = document.createElement('li');
+    li.innerHTML = `<details><summary><i style="--c:${band.colour}"></i><span>${prev ? `${prev}–${band.max}` : `Under ${band.max}`} min</span><b>${list.length}</b></summary><ol></ol></details>`;
+    li.querySelector('ol').append(...list.map(([t, s]) => {
+      const o = document.createElement('li');
+      o.innerHTML = '<button type="button"></button><span></span>';
+      o.querySelector('button').textContent = s.name;
+      o.querySelector('span').textContent = fmt(t);
+      o.querySelector('button').onclick = () => selectStation(s, true);
+      return o;
+    }));
+    return li;
+  }));
+  scene.requestRender();
+}
+function clearSelection() {
+  $('card').hidden = true;
+  isoDots.removeAll(); isoLabels.removeAll();
+  stationLayer.show = $('t-stations').checked;
+}
+
+const handler = new C.ScreenSpaceEventHandler(scene.canvas);
+handler.setInputAction((e) => {
+  const st = scene.pick(e.position)?.id;
+  if (st?.lines) selectStation(st);
 }, C.ScreenSpaceEventType.LEFT_CLICK);
-$('card-close').onclick = () => ($('card').hidden = true);
+$('card-close').onclick = clearSelection;
+
+// station search: native datalist over unique station names
+const byName = new Map();
+for (const st of stations) if (!byName.has(st.name)) byName.set(st.name, st);
+$('station-list').append(...[...byName.keys()].sort().map((n) => Object.assign(document.createElement('option'), { value: n })));
+$('station-search').addEventListener('change', (e) => {
+  const st = byName.get(e.target.value.trim());
+  if (st) { selectStation(st, true); e.target.blur(); }
+});
 
 $('loading').classList.add('done');
 window.__map = { viewer, lines, trains }; // handy for debugging in the console

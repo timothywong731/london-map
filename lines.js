@@ -60,20 +60,3 @@ export const OPERATORS = [
   nr('lumo', 'Lumo', '#2B6EF5', /Lumo/i),
   nr('grand-central', 'Grand Central', '#1D1D1B', /Grand Central/i),
 ];
-
-// London terminals that get a Blender landmark model. heading = compass bearing the tracks leave on.
-export const TERMINALS = [
-  { id: 'paddington', name: 'Paddington', lon: -0.1757, lat: 51.5160, model: 'paddington', heading: 299 },
-  { id: 'marylebone', name: 'Marylebone', lon: -0.1631, lat: 51.5225, model: 'marylebone', heading: 330 },
-  { id: 'euston', name: 'Euston', lon: -0.1337, lat: 51.5281, model: 'euston', heading: 350 },
-  { id: 'st-pancras', name: 'St Pancras International', lon: -0.1263, lat: 51.5313, model: 'st-pancras', heading: 352 },
-  { id: 'kings-cross', name: "King's Cross", lon: -0.1232, lat: 51.5320, model: 'kings-cross', heading: 352 },
-  { id: 'liverpool-street', name: 'Liverpool Street', lon: -0.0815, lat: 51.5181, model: 'liverpool-street', heading: 10 },
-  { id: 'fenchurch-street', name: 'Fenchurch Street', lon: -0.0788, lat: 51.5116, model: 'fenchurch-street', heading: 95 },
-  { id: 'cannon-street', name: 'Cannon Street', lon: -0.0905, lat: 51.5110, model: 'cannon-street', heading: 170 },
-  { id: 'london-bridge', name: 'London Bridge', lon: -0.0861, lat: 51.5050, model: 'london-bridge', heading: 100 },
-  { id: 'waterloo', name: 'Waterloo', lon: -0.1133, lat: 51.5031, model: 'waterloo', heading: 215 },
-  { id: 'charing-cross', name: 'Charing Cross', lon: -0.1247, lat: 51.5081, model: 'charing-cross', heading: 165 },
-  { id: 'victoria', name: 'Victoria', lon: -0.1440, lat: 51.4955, model: 'victoria', heading: 200 },
-  { id: 'blackfriars', name: 'Blackfriars', lon: -0.1035, lat: 51.5093, model: 'blackfriars', heading: 172 },
-];

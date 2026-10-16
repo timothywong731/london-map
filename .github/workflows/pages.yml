@@ -21,8 +21,12 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: node scripts/check-data.mjs
-      - run: mkdir _site && cp -r index.html style.css app.js config.js lines.js data assets _site/ && rm -rf _site/assets/source
+      - run: node scripts/check-data.mjs && node scripts/check-journey.mjs
+      - run: mkdir _site && cp -r index.html style.css app.js lines.js journey.js data assets _site/ && rm -rf _site/assets/source
+      - name: Write config.js from secret
+        env:
+          ION_TOKEN: ${{ secrets.CESIUM_ION_TOKEN }}
+        run: printf "export const ION_TOKEN = '%s';\n" "$ION_TOKEN" > _site/config.js
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

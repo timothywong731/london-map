@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { PNG } from 'pngjs';
 import { contours } from 'd3-contour';
-import { LINES, OPERATORS, TERMINALS } from '../lines.js';
+import { LINES, OPERATORS } from '../lines.js';
 
 const CACHE = '.cache';
 const OUT = 'data';
@@ -319,12 +319,15 @@ async function main() {
 
   // ---------- stations ----------
   const stations = new Map();
+  const naptanKey = new Map(); // TfL stop id -> our station key (hub code when there is one)
   const clean = (n) => n.replace(/ (Underground|Rail|DLR|Tram|Elizabeth line)? ?Station.*$/i, '').replace(/ Tram Stop$/i, '').replace(/\s*\(London\)$/, '').replace(/ \(.*?\)$/, (m) => m).trim();
   for (const def of [...LINES, ...OPERATORS]) {
     const sp = await tfl(`/Line/${def.tflId || def.id}/StopPoints`).catch(() => []);
     for (const p of sp) {
       if (!inBox([p.lon, p.lat], def.mode === 'national-rail' ? NR_BOX : BBOX)) continue;
-      const key = p.hubNaptanCode || p.id;
+      // tram stops come per platform with no hub: merge them by name
+      const key = p.hubNaptanCode || (def.mode === 'tram' ? 'TRAM:' + clean(p.commonName) : p.id);
+      naptanKey.set(p.id, key);
       const zone = (p.additionalProperties || []).find((a) => a.key === 'Zone')?.value;
       const zs = (zone || '').split(/[/+]/).map(Number).filter((n) => n >= 1 && n <= 9);
       let s = stations.get(key);
@@ -339,7 +342,51 @@ async function main() {
   const stationList = [...stations.values()].map((s) => ({ ...s, zones: s.zones.sort(), h: r1(ground(s.lon, s.lat)) }));
   console.log('stations', stationList.length);
 
-  const terminals = TERMINALS.map((t) => ({ ...t, h: r1(ground(t.lon, t.lat)) }));
+  // ---------- journey-time graph: consecutive calls on every TfL service pattern ----------
+  // Run time = dwell + track-ish distance / running speed. Express patterns add skip-stop edges.
+  const RUN_KMH = { tube: 42, 'elizabeth-line': 60, overground: 45, 'national-rail': 70, dlr: 35, tram: 25, 'cable-car': 7 };
+  const index = new Map(stationList.map((st, i) => [st.id, i]));
+  const best = new Map(); // "a|b|line" -> minutes
+  const allDefs = [...LINES, ...OPERATORS];
+  for (const [li, def] of allDefs.entries()) {
+    const seq = await tfl(`/Line/${def.id}/Route/Sequence/all`).catch(() => null);
+    if (!seq) continue;
+    for (const sps of seq.stopPointSequences || [])
+      for (const sp of sps.stopPoint) if (def.mode === 'tram' && !naptanKey.has(sp.id) && index.has('TRAM:' + clean(sp.name))) naptanKey.set(sp.id, 'TRAM:' + clean(sp.name));
+    for (const sps of seq.stopPointSequences || [])
+      for (const sp of sps.stopPoint) for (const k of [sp.id, sp.stationId, sp.topMostParentId]) if (!naptanKey.has(k) && index.has(sp.topMostParentId)) naptanKey.set(k, sp.topMostParentId);
+    for (const r of seq.orderedLineRoutes || [])
+      addCalls(r.naptanIds.map((n) => index.get(naptanKey.get(n) ?? n)).filter((i) => i !== undefined), li, def.mode);
+  }
+  // OSM route relations list stops in order: fills patterns TfL's API lacks (e.g. Bexleyheath line)
+  const nodeLL = new Map();
+  for (const w of ways.values()) w.nodes.forEach((n, i) => nodeLL.set(n, [w.geometry[i].lon, w.geometry[i].lat]));
+  for (const rel of rels) {
+    const li = allDefs.findIndex((d) => d.id === classify(rel));
+    if (li < 0) continue;
+    const cand = stationList.map((_, i) => i).filter((i) => stationList[i].lines.includes(allDefs[li].id));
+    const calls = [];
+    for (const m of rel.members) {
+      const p = m.type === 'node' && /^stop/.test(m.role) && nodeLL.get(m.ref);
+      if (!p) continue;
+      let bi = -1, bd = 400;
+      for (const i of cand) { const d = metres(p, [stationList[i].lon, stationList[i].lat]); if (d < bd) (bd = d), (bi = i); }
+      if (bi >= 0 && calls[calls.length - 1] !== bi) calls.push(bi);
+    }
+    addCalls(calls, li, allDefs[li].mode);
+  }
+  function addCalls(calls, li, mode) {
+    for (let i = 1; i < calls.length; i++) {
+      const a = calls[i - 1], b = calls[i];
+      if (a === b) continue;
+      const A = stationList[a], B = stationList[b];
+      const km = (metres([A.lon, A.lat], [B.lon, B.lat]) * 1.2) / 1000;
+      const min = 0.6 + (km / RUN_KMH[mode]) * 60;
+      for (const key of [`${a}|${b}|${li}`, `${b}|${a}|${li}`]) best.set(key, Math.min(best.get(key) ?? Infinity, min));
+    }
+  }
+  const edges = [...best].map(([k, m]) => { const [a, b, l] = k.split('|').map(Number); return [a, b, l, Math.round(m * 10) / 10]; });
+  console.log('graph edges', edges.length, 'stations linked', new Set(edges.map((e) => e[0])).size, '/', stationList.length);
 
   // ---------- zones: smooth nested contours of "zone <= k" ----------
   const zStations = stationList.filter((s) => s.zones.length);
@@ -408,8 +455,8 @@ async function main() {
   };
   write('lines.json', out);
   write('stations.json', stationList);
-  write('terminals.json', terminals);
   write('zones.json', zones);
+  write('graph.json', { lines: allDefs.map((d) => d.id), edges });
 }
 
 main().catch((e) => { console.error(e); process.exit(1); });
