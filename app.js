@@ -404,17 +404,9 @@ function clearSelection() {
   zoneLayer.show = $('t-zones').checked;
 }
 
-const handler = new C.ScreenSpaceEventHandler(scene.canvas);
-handler.setInputAction((e) => {
-  const st = scene.pick(e.position)?.id;
-  if (st?.lines) selectStation(st);
-}, C.ScreenSpaceEventType.LEFT_CLICK);
-$('card-close').onclick = clearSelection;
-
-// hover over the reachable area: read the journey time of the grid cell under the cursor
+// journey time of the reachable-area grid cell under a screen point (hover, or tap on touch screens)
 const tip = $('tip');
-handler.setInputAction((e) => {
-  const p = e.endPosition;
+function showTip(p) {
   const hit = isoField && scene.globe.pick(viewer.camera.getPickRay(p), scene);
   const ll = hit && C.Cartographic.fromCartesian(hit);
   let t = Infinity;
@@ -430,7 +422,15 @@ handler.setInputAction((e) => {
   tip.querySelector('span').textContent = `from ${isoField.from}`;
   tip.style.left = `${p.x}px`; tip.style.top = `${p.y}px`;
   tip.hidden = false;
-}, C.ScreenSpaceEventType.MOUSE_MOVE);
+}
+const handler = new C.ScreenSpaceEventHandler(scene.canvas);
+handler.setInputAction((e) => {
+  const st = scene.pick(e.position)?.id;
+  if (st?.lines) selectStation(st);
+  else showTip(e.position);
+}, C.ScreenSpaceEventType.LEFT_CLICK);
+handler.setInputAction((e) => showTip(e.endPosition), C.ScreenSpaceEventType.MOUSE_MOVE);
+$('card-close').onclick = clearSelection;
 scene.canvas.addEventListener('mouseleave', () => { tip.hidden = true; });
 
 // station search: native datalist over unique station names
