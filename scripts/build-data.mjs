@@ -344,7 +344,7 @@ async function main() {
 
   // ---------- journey-time graph: consecutive calls on every TfL service pattern ----------
   // Run time = dwell + track-ish distance / running speed. Express patterns add skip-stop edges.
-  const RUN_KMH = { tube: 42, 'elizabeth-line': 60, overground: 45, 'national-rail': 70, dlr: 35, tram: 25, 'cable-car': 7 };
+  const RUN_KMH = { tube: 45, 'elizabeth-line': 60, overground: 45, 'national-rail': 70, dlr: 35, tram: 25, 'cable-car': 7 };
   const index = new Map(stationList.map((st, i) => [st.id, i]));
   const best = new Map(); // "a|b|line" -> minutes
   const allDefs = [...LINES, ...OPERATORS];
@@ -380,7 +380,7 @@ async function main() {
       const a = calls[i - 1], b = calls[i];
       if (a === b) continue;
       const A = stationList[a], B = stationList[b];
-      const km = (metres([A.lon, A.lat], [B.lon, B.lat]) * 1.2) / 1000;
+      const km = (metres([A.lon, A.lat], [B.lon, B.lat]) * 1.1) / 1000;
       const min = 0.6 + (km / RUN_KMH[mode]) * 60;
       for (const key of [`${a}|${b}|${li}`, `${b}|${a}|${li}`]) best.set(key, Math.min(best.get(key) ?? Infinity, min));
     }

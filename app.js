@@ -1,5 +1,6 @@
 import { MODES } from './lines.js';
-import { BANDS, buildNetwork, travelTimes } from './journey.js';
+import { BANDS, buildNetwork, travelTimes, isochroneGrid } from './journey.js';
+import { contours } from 'https://cdn.jsdelivr.net/npm/d3-contour@4.0.2/+esm';
 // config.js is gitignored: local copy for dev, written from a repo secret by the Pages workflow.
 const { ION_TOKEN } = await import('./config.js').catch(() => ({}));
 
@@ -298,6 +299,47 @@ const stationIndex = new Map(stations.map((st, i) => [st, i]));
 const isoLayer = scene.primitives.add(new C.PrimitiveCollection());
 const isoDots = isoLayer.add(new C.PointPrimitiveCollection());
 const isoLabels = isoLayer.add(new C.LabelCollection({ scene }));
+const isoOutlines = isoLayer.add(new C.PrimitiveCollection());
+let isoImagery = null;
+// Grid the reachable-area map is computed on: ~100 m cells over the whole network
+const GRID = { w: -0.62, e: 0.38, s: 51.26, n: 51.74, cell: 100 };
+
+// Shade every band on the ground (an image draped on the terrain) and outline it with smooth contours.
+async function drawReachableArea(times) {
+  const { field, W, H } = isochroneGrid(stations, times, GRID, BANDS.at(-1).max);
+  const canvas = Object.assign(document.createElement('canvas'), { width: W, height: H });
+  const ctx = canvas.getContext('2d'), img = ctx.createImageData(W, H);
+  const rgb = BANDS.map((b) => [1, 3, 5].map((i) => parseInt(b.colour.slice(i, i + 2), 16)));
+  for (let i = 0; i < field.length; i++) {
+    const b = BANDS.findIndex((x) => field[i] <= x.max);
+    if (b < 0) continue;
+    img.data.set([...rgb[b], 255], i * 4);
+  }
+  ctx.putImageData(img, 0, 0);
+  const provider = await C.SingleTileImageryProvider.fromUrl(canvas.toDataURL(), {
+    rectangle: C.Rectangle.fromDegrees(GRID.w, GRID.s, GRID.e, GRID.n),
+  });
+  if (isoImagery) viewer.imageryLayers.remove(isoImagery);
+  isoImagery = viewer.imageryLayers.addImageryProvider(provider);
+  isoImagery.alpha = 0.72;
+
+  // contour lines: d3 fills "value >= threshold", so contour the negated times
+  const neg = Float64Array.from(field, (v) => (Number.isFinite(v) ? -v : -1e4));
+  const toLL = ([x, y]) => [GRID.w + (x / W) * (GRID.e - GRID.w), GRID.n - (y / H) * (GRID.n - GRID.s)];
+  isoOutlines.removeAll();
+  const instances = [];
+  for (const band of BANDS) {
+    const [mp] = contours().size([W, H]).thresholds([-band.max])(neg);
+    for (const poly of mp.coordinates) for (const ring of poly) {
+      if (ring.length < 8) continue;
+      instances.push(new C.GeometryInstance({
+        geometry: new C.GroundPolylineGeometry({ positions: C.Cartesian3.fromDegreesArray(ring.flatMap(toLL)), width: 1.5 }),
+        attributes: { color: C.ColorGeometryInstanceAttribute.fromColor(C.Color.WHITE.withAlpha(0.9)) },
+      }));
+    }
+  }
+  if (instances.length) isoOutlines.add(new C.GroundPolylinePrimitive({ geometryInstances: instances, appearance: new C.PolylineColorAppearance() }));
+}
 const fmt = (m) => (m < 60 ? `${Math.round(m)} min` : `${Math.floor(m / 60)} h ${String(Math.round(m % 60)).padStart(2, '0')}`);
 
 function selectStation(st, fly = false) {
@@ -313,19 +355,24 @@ function selectStation(st, fly = false) {
   $('card').hidden = false;
   if (fly) viewer.camera.flyTo({ destination: C.Cartesian3.fromDegrees(st.lon, st.lat - 0.16, 16000), orientation: { heading: 0, pitch: deg(-45), roll: 0 }, duration: 1.5 });
 
-  // every station reachable within the last band gets a dot in its band colour
+  // reachable area: rail (with changes between lines) then a walk from the station
   const origin = stationIndex.get(st), times = travelTimes(net, origin);
   isoDots.removeAll(); isoLabels.removeAll();
-  stationLayer.show = false; // plain markers would read as the palest band
+  stationLayer.show = zoneLayer.show = false; // markers and zone rings would clutter the shaded bands
+  drawReachableArea(times);
   const groups = BANDS.map(() => []);
   stations.forEach((s, i) => {
     const t = times[i], b = BANDS.findIndex((x) => t <= x.max);
     if (b < 0) return;
-    if (i !== origin) groups[b].push([t, s]);
     const pos = C.Cartesian3.fromDegrees(s.lon, s.lat, s.h + 6);
-    isoDots.add({ id: s, position: pos, pixelSize: i === origin ? 16 : 10, color: i === origin ? C.Color.WHITE : css(BANDS[b].colour),
-      outlineColor: i === origin ? css('#DA291C') : C.Color.WHITE, outlineWidth: i === origin ? 4 : 2, disableDepthTestDistance: Infinity });
-    if (i !== origin) isoLabels.add({ position: pos, text: fmt(t), font: '500 12px Jost, sans-serif', fillColor: C.Color.WHITE,
+    if (i === origin) {
+      isoDots.add({ id: s, position: pos, pixelSize: 16, color: C.Color.WHITE, outlineColor: css('#DA291C'), outlineWidth: 4, disableDepthTestDistance: Infinity });
+      return;
+    }
+    groups[b].push([t, s]);
+    isoDots.add({ id: s, position: pos, pixelSize: 6, color: C.Color.WHITE, outlineColor: css('#1D1D1B'), outlineWidth: 1.5,
+      disableDepthTestDistance: Infinity, distanceDisplayCondition: new C.DistanceDisplayCondition(0, 9000) });
+    isoLabels.add({ position: pos, text: `${s.name} ${fmt(t)}`, font: '500 12px Jost, sans-serif', fillColor: C.Color.WHITE,
       outlineColor: css('#1D1D1B'), outlineWidth: 3, style: C.LabelStyle.FILL_AND_OUTLINE, pixelOffset: new C.Cartesian2(0, 14),
       disableDepthTestDistance: Infinity, distanceDisplayCondition: new C.DistanceDisplayCondition(0, 7000) });
   });
@@ -348,8 +395,11 @@ function selectStation(st, fly = false) {
 }
 function clearSelection() {
   $('card').hidden = true;
-  isoDots.removeAll(); isoLabels.removeAll();
+  isoDots.removeAll(); isoLabels.removeAll(); isoOutlines.removeAll();
+  if (isoImagery) viewer.imageryLayers.remove(isoImagery);
+  isoImagery = null;
   stationLayer.show = $('t-stations').checked;
+  zoneLayer.show = $('t-zones').checked;
 }
 
 const handler = new C.ScreenSpaceEventHandler(scene.canvas);
