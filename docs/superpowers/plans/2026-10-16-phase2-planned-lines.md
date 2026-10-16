@@ -22,7 +22,7 @@
 
 ## Global Constraints
 
-- `config.js` (Cesium ion token) is gitignored and must NEVER be committed. Before every commit, run `git diff --cached | grep -c eyJhbGci`; it must print `0`.
+- `config.js` (Cesium ion token) is gitignored and must NEVER be committed. Before every commit, run `git diff --cached | grep -cE 'eyJhbGci[A-Za-z0-9_-]{20,}'`; it must print `0`.
 - Planned lines are excluded from `data/graph.json`, the journey times and the animated trains.
 - Card text, copied verbatim:
   - HS2: "Planned — opening 2036–39 (Euston 2040–43)"
@@ -176,7 +176,7 @@ If any file differs, the extraction changed behaviour. Diff against `git show HE
 
 ```bash
 git add scripts/bake-lib.mjs scripts/build-data.mjs
-git diff --cached | grep -c eyJhbGci   # must print 0
+git diff --cached | grep -cE 'eyJhbGci[A-Za-z0-9_-]{20,}'   # must print 0
 git commit -m "Extract shared bake helpers into scripts/bake-lib.mjs"   # plus the trailer
 ```
 
@@ -335,7 +335,7 @@ correct; Task 3 creates the file.
 
 ```bash
 git add lines.js scripts/check-data.mjs docs/superpowers/specs/2026-10-16-phase2-planned-lines-design.md
-git diff --cached | grep -c eyJhbGci   # 0
+git diff --cached | grep -cE 'eyJhbGci[A-Za-z0-9_-]{20,}'   # 0
 git commit -m "Planned line definitions (HS2, WLO) and failing data checks"   # plus the trailer
 ```
 
@@ -569,7 +569,7 @@ const [lines, stations, zones, graph, planned] = await Promise.all(
 
 ```bash
 git add scripts/build-planned.mjs data/planned.json package.json app.js scripts/check-data.mjs
-git diff --cached | grep -c eyJhbGci   # 0
+git diff --cached | grep -cE 'eyJhbGci[A-Za-z0-9_-]{20,}'   # 0
 git commit -m "Bake planned HS2 and West London Orbital routes from OSM track"   # plus the trailer
 ```
 
@@ -818,7 +818,7 @@ Expected: `ok` lines. The model assertion stays commented out until Task 5.
 
 ```bash
 git add index.html app.js style.css
-git diff --cached | grep -c eyJhbGci   # 0
+git diff --cached | grep -cE 'eyJhbGci[A-Za-z0-9_-]{20,}'   # 0
 git commit -m "Render planned HS2 and West London Orbital: dashed lines, ring stations, toggle, planned cards"   # plus the trailer
 ```
 
@@ -943,7 +943,7 @@ Expected: everything passes.
 
 ```bash
 git add assets/old_oak_common.glb assets/source/london-map-assets.blend app.js scripts/check-data.mjs
-git diff --cached | grep -c eyJhbGci   # 0
+git diff --cached | grep -cE 'eyJhbGci[A-Za-z0-9_-]{20,}'   # 0
 git commit -m "Old Oak Common HS2 station model (Blender) placed on the planned layer"   # plus the trailer
 ```
 
@@ -972,7 +972,7 @@ early-to-mid 2030s (not yet approved).
 - [ ] **Step 2: Push and watch the deploy**
 
 ```bash
-git add README.md && git diff --cached | grep -c eyJhbGci   # 0
+git add README.md && git diff --cached | grep -cE 'eyJhbGci[A-Za-z0-9_-]{20,}'   # 0
 git commit -m "README: planned lines"   # plus the trailer
 git push && gh run watch $(gh run list -L1 --json databaseId -q '.[0].databaseId') --exit-status
 ```
