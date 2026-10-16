@@ -34,11 +34,15 @@ const llen = (c) => { let L = 0; for (let i = 3; i < c.length; i += 3) L += Math
 const hs2 = planned.lines.find((l) => l.id === 'hs2'), wlo = planned.lines.find((l) => l.id === 'west-london-orbital');
 assert.ok(hs2 && wlo, 'both planned lines baked');
 const mainLen = hs2.segs.filter((s) => !s.branch).reduce((a, s) => a + llen(s.c), 0) / 1000;
-assert.ok(mainLen > 200 && mainLen < 240, `HS2 Euston-Curzon Street ${mainLen.toFixed(0)} km, expected 200-240`);
-// longest continuous tunnel = Chilterns (~16 km); adjacent tunnel segs are one run
-let run = 0, longest = 0;
-for (const s of hs2.segs.filter((s) => !s.branch)) { run = s.t ? run + llen(s.c) : 0; longest = Math.max(longest, run); }
-assert.ok(longest > 14000 && longest < 18000, `HS2 longest tunnel ${(longest / 1000).toFixed(1)} km, expected 14-18 (Chilterns)`);
+const allLen = hs2.segs.reduce((a, s) => a + llen(s.c), 0) / 1000;
+assert.ok(mainLen > 165 && mainLen < 190, `HS2 Euston-Curzon Street ${mainLen.toFixed(0)} km, expected 165-190`);
+assert.ok(allLen > 190 && allLen < 235, `HS2 incl. Handsacre link ${allLen.toFixed(0)} km, expected 190-235`);
+// tunnel runs on the main route (adjacent tunnel segs are one run): Chilterns ~16 km; Euston-Northolt ~22.6 km is the longest
+const runs = []; let run = 0;
+for (const s of hs2.segs.filter((s) => !s.branch)) { if (s.t) run += llen(s.c); else if (run) (runs.push(run), (run = 0)); }
+if (run) runs.push(run);
+assert.ok(runs.some((r) => r > 14000 && r < 18000), `HS2 Chilterns tunnel 14-18 km missing; runs km: ${runs.map((r) => (r / 1000).toFixed(1))}`);
+assert.ok(Math.max(...runs) < 25000, `HS2 longest tunnel ${(Math.max(...runs) / 1000).toFixed(1)} km, expected < 25`);
 // WLO passes every stop, in order, within 150 m
 const wloPts = wlo.segs.flatMap((s) => { const o = []; for (let i = 0; i < s.c.length; i += 3) o.push([s.c[i], s.c[i + 1]]); return o; });
 let at = 0;
