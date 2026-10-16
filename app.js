@@ -276,7 +276,7 @@ const on = (id, fn) => $(id).addEventListener('change', (e) => fn(e.target.check
 
 on('t-zones', (v) => (zoneLayer.show = v));
 on('t-stations', (v) => (stationLayer.show = v));
-on('t-planned', (v) => { plannedLayer.show = v; scene.requestRender(); });
+on('t-planned', (v) => { plannedLayer.show = v; if (buildings) buildings.style = buildingStyle(v); scene.requestRender(); });
 on('t-trains', (v) => {
   if (v && !trainLayer) buildTrains();
   if (trainLayer) trainLayer.show = v;
@@ -285,11 +285,20 @@ on('t-trains', (v) => {
 document.querySelectorAll('input[name=speed]').forEach((r) => r.addEventListener('change', () => (speedMult = +r.value)));
 
 let buildings = null;
+// OSM buildings keep their default colours; while planned lines show, those under the Old Oak Common model are hidden.
+// Model footprint: 400 m along the track, 125 m right / 136 m left of it, +20 m margin. Its bearing is ~west, so
+// along = longitude and left = south, and an axis-aligned box is close enough.
+const OOC = planned.models[0], OOC_DLAT = 1 / 111320, OOC_DLON = OOC_DLAT / Math.cos(deg(OOC.lat));
+const OOC_BOX = [OOC.lat - 156 * OOC_DLAT, OOC.lat + 145 * OOC_DLAT, OOC.lon - 220 * OOC_DLON, OOC.lon + 220 * OOC_DLON];
+const buildingStyle = (hide) => new C.Cesium3DTileStyle({
+  color: "Boolean(${feature['cesium#color']}) ? color(${feature['cesium#color']}) : color('#ffffff')",
+  ...(hide && { show: `!(\${feature['cesium#latitude']} > ${OOC_BOX[0]} && \${feature['cesium#latitude']} < ${OOC_BOX[1]} && ` +
+    `\${feature['cesium#longitude']} > ${OOC_BOX[2]} && \${feature['cesium#longitude']} < ${OOC_BOX[3]})` }),
+});
 on('t-buildings', async (v) => {
   if (v && !buildings) {
     buildings = scene.primitives.add(await C.createOsmBuildingsAsync());
-    // hide OSM buildings inside the Old Oak Common model footprint (~400 x 250 m)
-    buildings.style = new C.Cesium3DTileStyle({ show: '!(${feature["cesium#latitude"]} > 51.5225 && ${feature["cesium#latitude"]} < 51.5275 && ${feature["cesium#longitude"]} > -0.2530 && ${feature["cesium#longitude"]} < -0.2430)' });
+    buildings.style = buildingStyle(plannedLayer.show);
   }
   if (buildings) buildings.show = v;
 });
