@@ -37,6 +37,16 @@ const mainLen = hs2.segs.filter((s) => !s.branch).reduce((a, s) => a + llen(s.c)
 const allLen = hs2.segs.reduce((a, s) => a + llen(s.c), 0) / 1000;
 assert.ok(mainLen > 165 && mainLen < 190, `HS2 Euston-Curzon Street ${mainLen.toFixed(0)} km, expected 165-190`);
 assert.ok(allLen > 190 && allLen < 235, `HS2 incl. Handsacre link ${allLen.toFixed(0)} km, expected 190-235`);
+{ // the Handsacre branch must start on the main route, not 400 m off it
+  const b = hs2.segs.find((s) => s.branch).c, pts = hs2.segs.filter((s) => !s.branch).flatMap((s) => { const o = []; for (let i = 0; i < s.c.length; i += 3) o.push([s.c[i], s.c[i + 1]]); return o; });
+  const seg = (p, q) => { // metres from branch start to segment p-q (main points are simplified, so vertices alone are sparse)
+    const ax = (q[0] - p[0]) * 69500, ay = (q[1] - p[1]) * 111320, bx = (b[0] - p[0]) * 69500, by = (b[1] - p[1]) * 111320;
+    const t = Math.max(0, Math.min(1, (ax * bx + ay * by) / (ax * ax + ay * ay || 1)));
+    return Math.hypot(bx - t * ax, by - t * ay);
+  };
+  const d = Math.min(...pts.slice(1).map((p, i) => seg(pts[i], p)));
+  assert.ok(d < 50, `HS2 branch starts ${d.toFixed(0)} m from the main route`);
+}
 // tunnel runs on the main route (adjacent tunnel segs are one run): Chilterns ~16 km; Euston-Northolt ~22.6 km is the longest
 const runs = []; let run = 0;
 for (const s of hs2.segs.filter((s) => !s.branch)) { if (s.t) run += llen(s.c); else if (run) (runs.push(run), (run = 0)); }

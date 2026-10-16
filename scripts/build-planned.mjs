@@ -75,8 +75,13 @@ function path(g, a, b) {
 }
 
 // Route through stops in order; heights with tunnel ramps; split into tunnel / surface runs
-function route(g, waysById, stops, label) {
-  const nodes = stops.map((s) => {
+function route(g, waysById, stops, label, onto) {
+  const nodes = stops.map((s, i) => {
+    if (i === 0 && onto) { // a branch starts on the main route: nearest node of the main path
+      let b = null, bd = Infinity;
+      for (const m of onto) { const d = metres([s.lon, s.lat], g.ll.get(m)); if (d < bd) (bd = d), (b = m); }
+      return b;
+    }
     const n = nearestNode(g, [s.lon, s.lat], s.waypoint ? SNAP_WP : SNAP);
     if (!n) throw new Error(`${label}: no track within ${s.waypoint ? SNAP_WP : SNAP} m of ${s.name}`);
     return n;
@@ -92,7 +97,7 @@ function route(g, waysById, stops, label) {
   const kind = steps.map((s) => wayKind(waysById.get(s.way)?.tags || {}));
   const cum = [0];
   for (let i = 1; i < pts.length; i++) cum.push(cum[i - 1] + metres(pts[i - 1], pts[i]));
-  return { pts, tun, kind, cum };
+  return { pts, tun, kind, cum, ids: steps.map((s) => s.node) };
 }
 
 function heightsAndSegs(r, extra = {}) {
@@ -133,7 +138,7 @@ async function main() {
     const waysById = new Map(ways.map((w) => [w.id, w]));
     const g = buildGraph(ways);
     const main = route(g, waysById, stops, def.id);
-    const branches = def.branches.map((b, i) => route(g, waysById, b, `${def.id} branch ${i}`));
+    const branches = def.branches.map((b, i) => route(g, waysById, b, `${def.id} branch ${i}`, main.ids));
     console.log(def.id, 'ways', ways.length, 'main km', (main.cum.at(-1) / 1000).toFixed(1), 'branches km', branches.map((b) => (b.cum.at(-1) / 1000).toFixed(1)).join(','));
     console.log('terrain tiles', await loadTilesFor([...main.pts, ...branches.flatMap((b) => b.pts)]));
     const segs = [...heightsAndSegs(main), ...branches.flatMap((b) => heightsAndSegs(b, { branch: true }))];
