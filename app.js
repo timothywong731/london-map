@@ -300,13 +300,14 @@ const isoLayer = scene.primitives.add(new C.PrimitiveCollection());
 const isoDots = isoLayer.add(new C.PointPrimitiveCollection());
 const isoLabels = isoLayer.add(new C.LabelCollection({ scene }));
 const isoOutlines = isoLayer.add(new C.PrimitiveCollection());
-let isoImagery = null;
+let isoImagery = null, isoField = null; // isoField: the shown grid + origin, for the hover tooltip
 // Grid the reachable-area map is computed on: ~100 m cells over the whole network
 const GRID = { w: -0.62, e: 0.38, s: 51.26, n: 51.74, cell: 100 };
 
 // Shade every band on the ground (an image draped on the terrain) and outline it with smooth contours.
-async function drawReachableArea(times) {
+async function drawReachableArea(times, from) {
   const { field, W, H } = isochroneGrid(stations, times, GRID, BANDS.at(-1).max);
+  isoField = { field, W, H, from };
   const canvas = Object.assign(document.createElement('canvas'), { width: W, height: H });
   const ctx = canvas.getContext('2d'), img = ctx.createImageData(W, H);
   const rgb = BANDS.map((b) => [1, 3, 5].map((i) => parseInt(b.colour.slice(i, i + 2), 16)));
@@ -359,7 +360,7 @@ function selectStation(st, fly = false) {
   const origin = stationIndex.get(st), times = travelTimes(net, origin);
   isoDots.removeAll(); isoLabels.removeAll();
   stationLayer.show = zoneLayer.show = false; // markers and zone rings would clutter the shaded bands
-  drawReachableArea(times);
+  drawReachableArea(times, st.name);
   const groups = BANDS.map(() => []);
   stations.forEach((s, i) => {
     const t = times[i], b = BANDS.findIndex((x) => t <= x.max);
@@ -397,7 +398,8 @@ function clearSelection() {
   $('card').hidden = true;
   isoDots.removeAll(); isoLabels.removeAll(); isoOutlines.removeAll();
   if (isoImagery) viewer.imageryLayers.remove(isoImagery);
-  isoImagery = null;
+  isoImagery = isoField = null;
+  $('tip').hidden = true;
   stationLayer.show = $('t-stations').checked;
   zoneLayer.show = $('t-zones').checked;
 }
@@ -408,6 +410,28 @@ handler.setInputAction((e) => {
   if (st?.lines) selectStation(st);
 }, C.ScreenSpaceEventType.LEFT_CLICK);
 $('card-close').onclick = clearSelection;
+
+// hover over the reachable area: read the journey time of the grid cell under the cursor
+const tip = $('tip');
+handler.setInputAction((e) => {
+  const p = e.endPosition;
+  const hit = isoField && scene.globe.pick(viewer.camera.getPickRay(p), scene);
+  const ll = hit && C.Cartographic.fromCartesian(hit);
+  let t = Infinity;
+  if (ll) {
+    const { field, W, H } = isoField;
+    const x = Math.floor(((C.Math.toDegrees(ll.longitude) - GRID.w) / (GRID.e - GRID.w)) * W);
+    const y = Math.floor(((GRID.n - C.Math.toDegrees(ll.latitude)) / (GRID.n - GRID.s)) * H);
+    if (x >= 0 && x < W && y >= 0 && y < H) t = field[y * W + x];
+  }
+  const band = BANDS.find((b) => t <= b.max);
+  if (!band) { tip.hidden = true; return; }
+  tip.innerHTML = `<i style="--c:${band.colour}"></i><b>${t < 1 ? 'Under 1 min' : fmt(t)}</b><span></span>`;
+  tip.querySelector('span').textContent = `from ${isoField.from}`;
+  tip.style.left = `${p.x}px`; tip.style.top = `${p.y}px`;
+  tip.hidden = false;
+}, C.ScreenSpaceEventType.MOUSE_MOVE);
+scene.canvas.addEventListener('mouseleave', () => { tip.hidden = true; });
 
 // station search: native datalist over unique station names
 const byName = new Map();
