@@ -35,8 +35,8 @@ function frame(lon, lat, h, bearing) {
 }
 const gltf = (url, opts) => C.Model.fromGltfAsync({ url, upAxis: C.Axis.Y, forwardAxis: C.Axis.X, ...opts });
 
-const [lines, stations, zones, graph] = await Promise.all(
-  ['lines', 'stations', 'zones', 'graph'].map((f) => fetch(`data/${f}.json`).then((r) => r.json())),
+const [lines, stations, zones, graph, planned] = await Promise.all(
+  ['lines', 'stations', 'zones', 'graph', 'planned'].map((f) => fetch(`data/${f}.json`).then((r) => r.json())),
 );
 const byId = new Map(lines.map((l) => [l.id, l]));
 

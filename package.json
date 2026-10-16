@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "data": "node scripts/build-data.mjs",
+    "data": "node scripts/build-data.mjs && node scripts/build-planned.mjs",
     "check": "node scripts/check-data.mjs && node scripts/check-journey.mjs",
     "serve": "npx --yes http-server -c-1 -p 8080 ."
   },
