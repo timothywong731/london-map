@@ -84,6 +84,12 @@ export function travelTimes(net, origin) {
 // Time to reach each cell of a lon/lat grid: rail to the best station, then walk from it.
 // Row 0 is the north edge. Walking is capped so the area hugs the network, like a real isochrone.
 export const WALK_CAP = 20; // minutes on foot from the last station
+// Grid covering every station plus the longest walk from it, so outlying stations (e.g. Reading) are shaded too.
+export function gridFor(stations, cell = 100) {
+  const m = (WALK_CAP * WALK_SPEED) / WALK_DETOUR / 111320 / Math.cos((51.5 * Math.PI) / 180) + 0.005; // degrees, generous
+  const lon = stations.map((s) => s.lon), lat = stations.map((s) => s.lat);
+  return { w: Math.min(...lon) - m, e: Math.max(...lon) + m, s: Math.min(...lat) - m, n: Math.max(...lat) + m, cell };
+}
 export function isochroneGrid(stations, times, g, maxMin) {
   const kx = Math.cos((51.5 * Math.PI) / 180) * 111320, ky = 111320;
   const W = Math.ceil(((g.e - g.w) * kx) / g.cell), H = Math.ceil(((g.n - g.s) * ky) / g.cell);

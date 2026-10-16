@@ -1,5 +1,5 @@
 import { MODES } from './lines.js';
-import { BANDS, buildNetwork, travelTimes, isochroneGrid } from './journey.js';
+import { BANDS, buildNetwork, travelTimes, isochroneGrid, gridFor } from './journey.js';
 import { contours } from 'https://cdn.jsdelivr.net/npm/d3-contour@4.0.2/+esm';
 // config.js is gitignored: local copy for dev, written from a repo secret by the Pages workflow.
 const { ION_TOKEN } = await import('./config.js').catch(() => ({}));
@@ -302,7 +302,7 @@ const isoLabels = isoLayer.add(new C.LabelCollection({ scene }));
 const isoOutlines = isoLayer.add(new C.PrimitiveCollection());
 let isoImagery = null, isoField = null; // isoField: the shown grid + origin, for the hover tooltip
 // Grid the reachable-area map is computed on: ~100 m cells over the whole network
-const GRID = { w: -0.62, e: 0.38, s: 51.26, n: 51.74, cell: 100 };
+const GRID = gridFor(stations);
 
 // Shade every band on the ground (an image draped on the terrain) and outline it with smooth contours.
 async function drawReachableArea(times, from) {
@@ -368,6 +368,10 @@ function selectStation(st, fly = false) {
     const pos = C.Cartesian3.fromDegrees(s.lon, s.lat, s.h + 6);
     if (i === origin) {
       isoDots.add({ id: s, position: pos, pixelSize: 16, color: C.Color.WHITE, outlineColor: css('#DA291C'), outlineWidth: 4, disableDepthTestDistance: Infinity });
+      // the "from" station: a TfL-blue name tag above the dot, visible at every zoom
+      isoLabels.add({ position: pos, text: s.name, font: '500 16px Jost, sans-serif', fillColor: C.Color.WHITE,
+        showBackground: true, backgroundColor: css('#10069F'), backgroundPadding: new C.Cartesian2(9, 5),
+        pixelOffset: new C.Cartesian2(0, -16), verticalOrigin: C.VerticalOrigin.BOTTOM, disableDepthTestDistance: Infinity });
       return;
     }
     groups[b].push([t, s]);
