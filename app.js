@@ -288,11 +288,11 @@ let buildings = null;
 // OSM buildings keep their default colours; while planned lines show, those under the Old Oak Common model are hidden.
 // Model footprint: 400 m along the track, 125 m right / 136 m left of it, +20 m margin. Its bearing is ~west, so
 // along = longitude and left = south, and an axis-aligned box is close enough.
-const OOC = planned.models[0], OOC_DLAT = 1 / 111320, OOC_DLON = OOC_DLAT / Math.cos(deg(OOC.lat));
+const OOC = planned.models[0] || { lat: 0, lon: 0 }, OOC_DLAT = 1 / 111320, OOC_DLON = OOC_DLAT / Math.cos(deg(OOC.lat));
 const OOC_BOX = [OOC.lat - 156 * OOC_DLAT, OOC.lat + 145 * OOC_DLAT, OOC.lon - 220 * OOC_DLON, OOC.lon + 220 * OOC_DLON];
 const buildingStyle = (hide) => new C.Cesium3DTileStyle({
   color: "Boolean(${feature['cesium#color']}) ? color(${feature['cesium#color']}) : color('#ffffff')",
-  ...(hide && { show: `!(\${feature['cesium#latitude']} > ${OOC_BOX[0]} && \${feature['cesium#latitude']} < ${OOC_BOX[1]} && ` +
+  ...(hide && planned.models.length && { show: `!(\${feature['cesium#latitude']} > ${OOC_BOX[0]} && \${feature['cesium#latitude']} < ${OOC_BOX[1]} && ` +
     `\${feature['cesium#longitude']} > ${OOC_BOX[2]} && \${feature['cesium#longitude']} < ${OOC_BOX[3]})` }),
 });
 on('t-buildings', async (v) => {
@@ -428,7 +428,7 @@ function selectStation(st, fly = false) {
     if (l && isLight(l.colour)) li.className = 'light';
     return li;
   }));
-  for (const p of plannedByStation.get(st.id) || []) $('card-lines').append(...p.lines.map(plannedChip));
+  if (plannedLayer.show) for (const p of plannedByStation.get(st.id) || []) $('card-lines').append(...p.lines.map(plannedChip));
   $('card-times').closest('.times').hidden = false;
   $('card').hidden = false;
   if (fly) viewer.camera.flyTo({ destination: C.Cartesian3.fromDegrees(st.lon, st.lat - 0.16, 16000), orientation: { heading: 0, pitch: deg(-45), roll: 0 }, duration: 1.5 });
@@ -522,7 +522,7 @@ for (const st of planned.stations) if (!st.existing && !byName.has(st.name)) byN
 $('station-list').append(...[...byName.keys()].sort().map((n) => Object.assign(document.createElement('option'), { value: n })));
 $('station-search').addEventListener('change', (e) => {
   const st = byName.get(e.target.value.trim());
-  if (st) { selectStation(st, true); e.target.blur(); }
+  if (st && (plannedLayer.show || !st.planned || st.existing)) { selectStation(st, true); e.target.blur(); }
 });
 
 $('loading').classList.add('done');

@@ -134,7 +134,7 @@ async function main() {
       return { ...s, lon: s.hs2Lon ?? s.lon ?? ex.lon, lat: s.hs2Lat ?? s.lat ?? ex.lat, existing: ex?.id ?? null };
     });
     const j = await overpass('planned_' + def.id, `[out:json][timeout:600];${def.osm.select}${box(def.osm.bbox)};out body geom;`);
-    const ways = j.elements.filter((e) => e.type === 'way' && e.geometry);
+    const ways = j.elements.filter((e) => e.type === 'way' && e.geometry && (!def.osm.select.includes('"construction"') || e.tags?.construction === 'rail' || e.tags?.['construction:railway'] === 'rail'));
     const waysById = new Map(ways.map((w) => [w.id, w]));
     const g = buildGraph(ways);
     const main = route(g, waysById, stops, def.id);

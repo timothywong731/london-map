@@ -25,8 +25,9 @@ lines, a "fly to HS2" control, and HS2 Phase 2 (cancelled 2023).
   - New stations: Neasden, Harlesden, Old Oak Common Lane and Lionel Road.
   - Calling pattern used: Hendon, Brent Cross West, Neasden, Harlesden, Old Oak Common Lane,
     Acton Central, South Acton, Lionel Road, Brentford, Syon Lane, Isleworth, Hounslow.
-  - The calling pattern is checked against TfL's 2026 material during implementation, and the
-    spec is updated if it differs.
+  - The calling pattern was checked against TfL's March 2026 funding announcement (Hendon, Brent Cross,
+    Neasden, Harlesden, Old Oak Common, Acton, Brentford, Hounslow; new stations Old Oak Common Lane,
+    Neasden, Harlesden, Lionel Road) and matches.
 
 ## Data (scripts/build-data.mjs)
 
@@ -38,7 +39,8 @@ lines, a "fly to HS2" control, and HS2 Phase 2 (cancelled 2023).
 - `stops`: ordered station names, each with lon/lat for stations that don't exist yet
 
 Colours:
-- HS2 uses the HS2 Ltd brand colour, confirmed from hs2.org.uk during implementation.
+- HS2 brand colour: could not be confirmed (the HS2 design system site was offline, Oct 2026), so `#005F83`
+  remains a placeholder, a one-line constant in `lines.js`.
 - WLO uses Overground orange `#EF7B10`.
 
 ### HS2 geometry
@@ -102,8 +104,11 @@ Colours:
 
 ## Checks (scripts/check-data.mjs)
 
-- HS2 length from Euston to Curzon Street is 200–240 km.
-- HS2 has a continuous tunnel section of 14–18 km (the Chilterns).
+- HS2 main route (Euston–Curzon Street) is 165–190 km; main + Handsacre link is 190–235 km (the oft-quoted
+  ~225 km Phase One figure includes the link).
+- Some continuous main-route tunnel run is 14–18 km (the Chilterns) and the longest run is under 25 km
+  (Euston–Old Oak Common–Northolt is one ~22.6 km run in OSM).
+- The Handsacre branch starts within 50 m of the main route.
 - The WLO polyline passes within 150 m of every stop, in order.
 - No planned line id appears in `graph.json`.
 - `assets/old_oak_common.glb` exists and is under 1.5 MB.
