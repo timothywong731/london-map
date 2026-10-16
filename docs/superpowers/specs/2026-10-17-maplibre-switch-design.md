@@ -29,7 +29,7 @@ Out of scope:
   visible.
 - Start view: centre `[-0.118, 51.48]`, zoom about 10.3, pitch 45, bearing 0. Tilt and rotate stay
   on. Double-click zoom stays at MapLibre's default.
-- Clicking a station uses `flyTo` to the station: zoom about 13, pitch 45.
+- Clicking a station uses `flyTo` to the station: zoom 11, pitch 45. That is about today's 16 km view, so the reachable area stays in frame.
 
 ## How each feature carries over
 
@@ -55,7 +55,7 @@ These follow today's rules:
   - The tick is a `symbol` layer using one white bar icon added with `map.addImage` (SDF, so it
     can be tinted), with `icon-color` set from the line colour.
   - It uses `icon-rotate` from the computed bearing and `icon-rotation-alignment: map`.
-- **Labels:** a `symbol` layer, Jost if available, otherwise the basemap's fonts.
+- **Labels:** a `symbol` layer, in the basemap's `Noto Sans Regular` glyphs (map text can only use fonts the tile server provides, so Jost isn't possible).
   - Dark text with a white halo, which reads best on Positron.
   - Interchange labels appear from zoom 12 and other labels from zoom 13.5.
 
@@ -105,7 +105,7 @@ the same lookup as now without picking against the globe.
 
 ## Removed
 
-- Cesium (script, CSS, viewer), the ion token, `config.js`, and its gitignore entry.
+- Cesium (script, CSS, viewer), the ion token, and `config.js`. The `config.js` line in `.gitignore` stays, because the local file still holds the token and must never be committed.
 - The deploy step "Write config.js from secret". The cache-bust sed no longer mentions `config`.
 - The "See underground" switch and its code.
 - 3D models:
