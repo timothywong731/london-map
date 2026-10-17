@@ -21,8 +21,10 @@ const map = new maplibregl.Map({
 map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), 'bottom-right');
 const mapReady = new Promise((resolve, reject) => {
   map.once('load', resolve);
-  map.once('error', (e) => { if (!map.isStyleLoaded()) reject(e.error); });
+  // only the style itself failing is fatal; a single tile error before 'load' is not
+  map.on('error', (e) => { if (!e.tile && !e.sourceId && !map.loaded()) reject(e.error); });
 });
+mapReady.catch(() => {}); // handled below once the data has arrived
 
 const [lines, stations, zones, graph, planned] = await Promise.all(
   ['lines', 'stations', 'zones', 'graph', 'planned'].map((f) => fetch(`data/${f}.json`).then((r) => r.json())),
