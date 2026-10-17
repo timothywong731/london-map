@@ -22,18 +22,14 @@ jobs:
         with:
           node-version: 22
       - run: node scripts/check-data.mjs && node scripts/check-journey.mjs
-      - run: mkdir _site && cp -r index.html style.css app.js lines.js journey.js data assets _site/ && rm -rf _site/assets/source
+      - run: mkdir _site && cp -r index.html style.css app.js lines.js journey.js data _site/
       # Pages caches files for 10 min: stamp code/data URLs with the commit so a new page never runs stale scripts
       - name: Cache-bust code and data
         run: |
           V=${GITHUB_SHA::8}
           sed -i -E "s/(href=\"style\.css|src=\"app\.js)\"/\1?v=$V\"/" _site/index.html
-          sed -i -E "s#'\./(lines|journey|config)\.js'#'./\1.js?v=$V'#; s#data/[$][{]f[}][.]json#data/\${f}.json?v=$V#" _site/*.js
+          sed -i -E "s#'\./(lines|journey)\.js'#'./\1.js?v=$V'#; s#data/[$][{]f[}][.]json#data/\${f}.json?v=$V#" _site/*.js
           grep -q "app.js?v=$V" _site/index.html && grep -q "journey.js?v=$V" _site/app.js && grep -q "json?v=$V" _site/app.js
-      - name: Write config.js from secret
-        env:
-          ION_TOKEN: ${{ secrets.CESIUM_ION_TOKEN }}
-        run: printf "export const ION_TOKEN = '%s';\n" "$ION_TOKEN" > _site/config.js
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

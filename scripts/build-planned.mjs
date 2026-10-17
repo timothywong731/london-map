@@ -2,7 +2,7 @@
 // Vertical profile is indicative, from OSM tunnel/bridge tags, as in build-data.mjs.
 import fs from 'node:fs';
 import { PLANNED } from '../lines.js';
-import { overpass, metres, rad, simplifyIdx, loadTilesFor, ground, wayKind, RAMP } from './bake-lib.mjs';
+import { overpass, metres, simplifyIdx, loadTilesFor, ground, wayKind, RAMP } from './bake-lib.mjs';
 
 const stations = JSON.parse(fs.readFileSync('data/stations.json', 'utf8'));
 const box = (b) => `(${b.s},${b.w},${b.n},${b.e})`;
@@ -126,7 +126,7 @@ function heightsAndSegs(r, extra = {}) {
 }
 
 async function main() {
-  const out = { lines: [], stations: [], models: [] };
+  const out = { lines: [], stations: [] };
   for (const def of PLANNED) {
     const stops = def.stops.map((s) => {
       const ex = s.lon === undefined ? stations.find((x) => x.name === s.name) : null;
@@ -148,12 +148,6 @@ async function main() {
       if (prev) { prev.lines.push(def.id); continue; }
       out.stations.push({ id: 'PLANNED:' + s.name, name: s.name, lon: r5(s.lon), lat: r5(s.lat), h: r1(ground(s.lon, s.lat)),
         lines: [def.id], also: s.also || [], existing: s.existing, opens: def.opens });
-    }
-    if (def.id === 'hs2') {
-      const ooc = stops[1], i = main.pts.reduce((bi, p, k) => (metres(p, [ooc.lon, ooc.lat]) < metres(main.pts[bi], [ooc.lon, ooc.lat]) ? k : bi), 0);
-      const a = main.pts[Math.max(0, i - 5)], b = main.pts[Math.min(main.pts.length - 1, i + 5)];
-      const bearing = (Math.atan2((b[0] - a[0]) * Math.cos(a[1] * rad), b[1] - a[1]) * 180) / Math.PI;
-      out.models.push({ file: 'old_oak_common.glb', lon: r5(ooc.lon), lat: r5(ooc.lat), h: r1(ground(ooc.lon, ooc.lat)), bearing: Math.round(bearing) });
     }
   }
   fs.writeFileSync('data/planned.json', JSON.stringify(out));
