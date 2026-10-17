@@ -22,7 +22,7 @@ jobs:
         with:
           node-version: 22
       - run: node scripts/check-data.mjs && node scripts/check-journey.mjs
-      - run: mkdir _site && cp -r index.html style.css app.js lines.js journey.js data _site/
+      - run: mkdir _site && cp -r index.html style.css app.js lines.js journey.js data favicon.svg og.jpg sitemap.xml _site/
       # Pages caches files for 10 min: stamp code/data URLs with the commit so a new page never runs stale scripts
       - name: Cache-bust code and data
         run: |

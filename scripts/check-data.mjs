@@ -71,4 +71,21 @@ assert.ok(!('models' in planned), 'planned.json carries no 3D models');
 assert.ok(!fs.existsSync('assets'), '3D assets removed');
 
 for (const f of ['app.js', 'index.html']) assert.ok(!/cesium/i.test(fs.readFileSync(f, 'utf8')), `${f} no longer uses Cesium`);
+// branding and discoverability: one name everywhere, a canonical URL, link previews, a sitemap
+{
+  const URL = 'https://timothywong731.github.io/london-map/', html = fs.readFileSync('index.html', 'utf8');
+  for (const f of ['index.html', 'README.md', 'style.css']) assert.ok(!/Rail 3D|roundel/.test(fs.readFileSync(f, 'utf8')), `${f}: old name and roundel gone`);
+  assert.match(html, /<title>London Tube and Rail Map[^<]*<\/title>/, 'title');
+  assert.match(html, /<h1>London Tube and Rail Map<\/h1>/, 'panel header');
+  const desc = html.match(/<meta name="description" content="([^"]+)"/)?.[1];
+  assert.ok(desc && desc.length <= 160, 'meta description under 160 chars');
+  assert.ok(html.includes(`<link rel="canonical" href="${URL}">`), 'canonical link');
+  assert.ok(html.includes(`<meta property="og:image" content="${URL}og.jpg">`) && fs.existsSync('og.jpg'), 'Open Graph image');
+  assert.ok(html.includes('<link rel="icon" href="favicon.svg"') && fs.existsSync('favicon.svg'), 'favicon');
+  const ld = JSON.parse(html.match(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/)[1]);
+  assert.equal(ld['@type'], 'WebApplication'); assert.equal(ld.url, URL);
+  assert.ok(fs.readFileSync('sitemap.xml', 'utf8').includes(`<loc>${URL}</loc>`), 'sitemap lists the page');
+  const wf = fs.readFileSync('.github/workflows/pages.yml', 'utf8');
+  for (const f of ['favicon.svg', 'og.jpg', 'sitemap.xml']) assert.ok(wf.includes(f), `deploy copies ${f}`);
+}
 console.log(`ok: ${lines.length} lines, ${stations.length} stations, ${zones.length} zones`);

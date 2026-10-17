@@ -25,8 +25,7 @@ button.icon:hover { background: rgba(255,255,255,.15); }
 }
 .brand { display: flex; align-items: center; gap: 10px; padding: 10px 10px 10px 14px; background: var(--tfl-blue); color: #fff; }
 .brand h1 { font-size: 19px; font-weight: 500; margin: 0; flex: 1; letter-spacing: .01em; }
-.roundel { width: 28px; height: 28px; border-radius: 50%; border: 5px solid #DA291C; position: relative; background: #fff; flex: none; }
-.roundel i { position: absolute; left: -9px; right: -9px; top: 50%; height: 7px; margin-top: -3.5px; background: var(--tfl-blue); outline: 1.5px solid #fff; }
+.mark { flex: none; border-radius: 7px; box-shadow: 0 0 0 1.5px rgba(255,255,255,.6); }
 #collapse svg { transition: transform .2s; }
 #panel.collapsed #collapse svg { transform: rotate(180deg); }
 #panel.collapsed #panel-body { display: none; }

@@ -1,4 +1,4 @@
-# London Rail 3D
+# London Tube and Rail Map
 
 Interactive map of London's rail network, built with MapLibre GL JS on an OpenFreeMap basemap. Tilt and rotate it, and switch on 3D buildings.
 
