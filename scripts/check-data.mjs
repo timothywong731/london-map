@@ -70,4 +70,5 @@ assert.ok(planned.stations.find((s) => s.name === 'Euston')?.existing, 'Euston l
 const glb = 'assets/old_oak_common.glb';
 assert.ok(fs.existsSync(glb) && fs.statSync(glb).size < 1.5e6, 'Old Oak Common model exists, < 1.5 MB');
 
+for (const f of ['app.js', 'index.html']) assert.ok(!/cesium/i.test(fs.readFileSync(f, 'utf8')), `${f} no longer uses Cesium`);
 console.log(`ok: ${lines.length} lines, ${stations.length} stations, ${zones.length} zones`);

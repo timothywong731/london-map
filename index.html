@@ -4,13 +4,13 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>London Rail 3D</title>
-  <meta name="description" content="Interactive 3D map of London's Underground, Overground, Elizabeth line, DLR, Trams and National Rail over real terrain.">
+  <meta name="description" content="Interactive map of London's Underground, Overground, Elizabeth line, DLR, Trams and National Rail, with planned HS2 and the West London Orbital.">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Jost:wght@400;500;600&display=swap" rel="stylesheet">
-  <link href="https://cdn.jsdelivr.net/npm/cesium@1.145.0/Build/Cesium/Widgets/widgets.css" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/maplibre-gl@5.6.0/dist/maplibre-gl.css" rel="stylesheet">
   <link href="style.css" rel="stylesheet">
-  <script src="https://cdn.jsdelivr.net/npm/cesium@1.145.0/Build/Cesium/Cesium.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/maplibre-gl@5.6.0/dist/maplibre-gl.js"></script>
 </head>
 <body>
   <div id="map"></div>
@@ -41,7 +41,6 @@
         <label class="switch"><input type="checkbox" id="t-zones" checked><span>Fare zones</span></label>
         <label class="switch"><input type="checkbox" id="t-stations" checked><span>Stations</span></label>
         <label class="switch"><input type="checkbox" id="t-buildings"><span>3D buildings</span></label>
-        <label class="switch"><input type="checkbox" id="t-underground"><span>See underground</span></label>
         <label class="switch"><input type="checkbox" id="t-planned" checked><span>Planned lines</span></label>
       </section>
       <div id="key"></div>

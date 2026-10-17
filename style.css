@@ -8,12 +8,10 @@
   --font: 'Jost', 'Gill Sans', 'Segoe UI', sans-serif;
 }
 * { box-sizing: border-box; }
-html, body { margin: 0; height: 100%; overflow: hidden; background: #0d1a26; font-family: var(--font); color: var(--ink); }
+html, body { margin: 0; height: 100%; overflow: hidden; background: #F2F2F0; font-family: var(--font); color: var(--ink); }
 #map { position: absolute; inset: 0; }
 
-/* Cesium chrome we keep: credits only */
-.cesium-viewer-bottom { left: auto; right: 8px; }
-.cesium-widget-credits { font-family: var(--font); }
+.maplibregl-ctrl-attrib { font-family: var(--font); }
 
 button.icon { border: 0; background: none; color: inherit; cursor: pointer; padding: 6px; border-radius: 6px; display: grid; place-items: center; }
 button.icon:hover { background: rgba(255,255,255,.15); }
@@ -122,12 +120,11 @@ section { padding: 10px 14px; border-bottom: 1px solid var(--rule); }
 @media (max-width: 640px) {
   #panel { top: auto; bottom: 0; left: 0; right: 0; width: auto; max-height: 55%; border-radius: 12px 12px 0 0; }
   #card { left: 16px; right: 16px; width: auto; }
-  .cesium-viewer-bottom { display: none; }
+  /* the panel covers the bottom on phones: attribution moves to the top, zoom buttons go (pinch instead) */
+  .maplibregl-ctrl-bottom-right { top: 0; bottom: auto; }
+  .maplibregl-ctrl-group { display: none; }
 }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 
-/* planned lines: dashed bar / chip, like TfL's "under construction" notation */
-.bar.planned { background: repeating-linear-gradient(90deg, var(--c) 0 12px, transparent 12px 18px) bottom / 100% 4px no-repeat, #F2F2F0; color: var(--ink); font-style: italic; }
-.bar.planned[aria-pressed="false"] { color: var(--muted); background: #F2F2F0; }
-#card li.planned { background: repeating-linear-gradient(90deg, var(--c) 0 10px, transparent 10px 15px) bottom / 100% 3px no-repeat, #F2F2F0; color: var(--ink); font-style: italic; }
+/* planned stations: badge on the card */
 .badge { display: inline-block; background: var(--ink); color: #fff; border-radius: 3px; padding: 0 6px; font-size: 12.5px; font-weight: 600; margin-right: 4px; }

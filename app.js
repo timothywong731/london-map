@@ -1,313 +1,228 @@
 import { MODES } from './lines.js';
-import { BANDS, buildNetwork, travelTimes, isochroneGrid, gridFor } from './journey.js';
+import { BANDS, buildNetwork, travelTimes, isochroneGrid, gridFor, mercatorRows } from './journey.js';
 import { contours } from 'https://cdn.jsdelivr.net/npm/d3-contour@4.0.2/+esm';
-// config.js is gitignored: local copy for dev, written from a repo secret by the Pages workflow.
-const { ION_TOKEN } = await import('./config.js').catch(() => ({}));
 
-const C = window.Cesium;
-if (ION_TOKEN) C.Ion.defaultAccessToken = ION_TOKEN;
+const $ = (id) => document.getElementById(id);
+const rad = Math.PI / 180;
+const isLight = (hex) => {
+  const n = parseInt(hex.slice(1), 16);
+  return (0.2126 * (n >> 16) + 0.7152 * ((n >> 8) & 255) + 0.0722 * (n & 255)) / 255 > 0.6;
+};
+const metres = (a, b) => Math.hypot((b[0] - a[0]) * 111320 * Math.cos(a[1] * rad), (b[1] - a[1]) * 111320);
+const lonLats = (c) => { const o = []; for (let i = 0; i < c.length; i += 3) o.push([c[i], c[i + 1]]); return o; }; // baked [lon, lat, h, ...]; heights unused on a flat map
+const fc = (features) => ({ type: 'FeatureCollection', features });
+const pt = (coordinates, properties) => ({ type: 'Feature', properties, geometry: { type: 'Point', coordinates } });
+const FONT = ['Noto Sans Regular']; // map text can only use the tile server's glyphs
 
-const viewer = new C.Viewer('map', {
-  terrain: C.Terrain.fromWorldTerrain(),
-  baseLayer: C.ImageryLayer.fromWorldImagery({ style: C.IonWorldImageryStyle.AERIAL }),
-  baseLayerPicker: false, geocoder: false, homeButton: false, sceneModePicker: false,
-  navigationHelpButton: false, animation: false, timeline: false, fullscreenButton: false,
-  infoBox: false, selectionIndicator: false,
+const map = new maplibregl.Map({
+  container: 'map', style: 'https://tiles.openfreemap.org/styles/positron',
+  center: [-0.118, 51.48], zoom: 10.3, pitch: 45, bearing: 0, maxPitch: 70, attributionControl: { compact: true },
 });
-const scene = viewer.scene;
-scene.globe.depthTestAgainstTerrain = false; // keep tunnels visible through the ground by default
-scene.postProcessStages.fxaa.enabled = true;
-viewer.cesiumWidget.screenSpaceEventHandler.removeInputAction(C.ScreenSpaceEventType.LEFT_DOUBLE_CLICK);
-
-const HOME = { destination: C.Cartesian3.fromDegrees(-0.118, 51.33, 19000), orientation: { heading: 0, pitch: C.Math.toRadians(-42), roll: 0 } };
-viewer.camera.setView(HOME);
-
-const css = (hex) => C.Color.fromCssColorString(hex);
-const isLight = (hex) => { const c = css(hex); return 0.2126 * c.red + 0.7152 * c.green + 0.0722 * c.blue > 0.6; };
-const deg = C.Math.toRadians;
-
-// Local frame whose +X points along `bearing` (deg from north), +Z up. Blender assets use +X forward.
-function frame(lon, lat, h, bearing) {
-  const enu = C.Transforms.eastNorthUpToFixedFrame(C.Cartesian3.fromDegrees(lon, lat, h));
-  const b = deg(bearing), s = Math.sin(b), c = Math.cos(b);
-  const rot = new C.Matrix4(s, -c, 0, 0, c, s, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1); // row-major: cols = fwd, left, up
-  return C.Matrix4.multiply(enu, rot, new C.Matrix4());
-}
-const gltf = (url, opts) => C.Model.fromGltfAsync({ url, upAxis: C.Axis.Y, forwardAxis: C.Axis.X, ...opts });
+map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), 'bottom-right');
+const mapReady = new Promise((resolve, reject) => {
+  map.once('load', resolve);
+  map.once('error', (e) => { if (!map.isStyleLoaded()) reject(e.error); });
+});
 
 const [lines, stations, zones, graph, planned] = await Promise.all(
   ['lines', 'stations', 'zones', 'graph', 'planned'].map((f) => fetch(`data/${f}.json`).then((r) => r.json())),
 );
-const byId = new Map(lines.map((l) => [l.id, l]));
-
-// ---------------- lines ----------------
-const WIDTH = { tube: 4, 'elizabeth-line': 5, overground: 3.5, dlr: 3, tram: 3, 'cable-car': 3, 'national-rail': 2 };
-const linePrims = new Map();
-for (const l of lines) {
-  const col = css(l.colour);
-  const instances = l.segs.filter((s) => s.c.length >= 6).map((s) => new C.GeometryInstance({
-    geometry: new C.PolylineGeometry({
-      positions: C.Cartesian3.fromDegreesArrayHeights(s.c),
-      width: WIDTH[l.mode], arcType: C.ArcType.NONE, vertexFormat: C.PolylineColorAppearance.VERTEX_FORMAT,
-    }),
-    attributes: { color: C.ColorGeometryInstanceAttribute.fromColor(s.t ? col.withAlpha(0.5) : col) },
-  }));
-  if (!instances.length) continue;
-  linePrims.set(l.id, scene.primitives.add(new C.Primitive({
-    geometryInstances: instances, appearance: new C.PolylineColorAppearance({ translucent: true }),
-  })));
+try {
+  await mapReady;
+} catch (err) {
+  $('loading').textContent = "Couldn't load the base map";
+  $('loading').classList.add('error');
+  throw err;
 }
+const byId = new Map(lines.map((l) => [l.id, l]));
+const plannedById = new Map(planned.lines.map((l) => [l.id, l]));
+const lineOf = (id) => byId.get(id) || plannedById.get(id);
+const vis = (ids, show) => ids.forEach((id) => map.setLayoutProperty(id, 'visibility', show ? 'visible' : 'none'));
 
-// ---------------- zones: alternating soft bands, white boundary, number labels ----------------
-const zoneLayer = new C.PrimitiveCollection();
-scene.primitives.add(zoneLayer);
+// ---------------- zones: alternating soft bands, boundary, number labels ----------------
+const ZONE_LAYERS = ['zones-fill', 'zones-line', 'zones-label'];
 {
-  const rings = zones.map((z) => z.rings[0]);
-  const band = (i) => new C.GeometryInstance({
-    geometry: new C.PolygonGeometry({
-      polygonHierarchy: new C.PolygonHierarchy(C.Cartesian3.fromDegreesArray(rings[i]),
-        i ? [new C.PolygonHierarchy(C.Cartesian3.fromDegreesArray(rings[i - 1]))] : []),
-    }),
-    attributes: { color: C.ColorGeometryInstanceAttribute.fromColor(i % 2 ? css('#10069F').withAlpha(0.10) : C.Color.WHITE.withAlpha(0.13)) },
-  });
-  zoneLayer.add(new C.GroundPrimitive({
-    geometryInstances: rings.map((_, i) => band(i)),
-    appearance: new C.PerInstanceColorAppearance({ flat: true, translucent: true }),
-  }));
-  zoneLayer.add(new C.GroundPolylinePrimitive({
-    geometryInstances: rings.map((r) => new C.GeometryInstance({
-      geometry: new C.GroundPolylineGeometry({ positions: C.Cartesian3.fromDegreesArray([...r, r[0], r[1]]), width: 2 }),
-      attributes: { color: C.ColorGeometryInstanceAttribute.fromColor(C.Color.WHITE.withAlpha(0.8)) },
-    })),
-    appearance: new C.PolylineColorAppearance(),
-  }));
+  const rings = zones.map((z) => { const r = []; for (let i = 0; i < z.rings[0].length; i += 2) r.push([z.rings[0][i], z.rings[0][i + 1]]); r.push(r[0]); return r; });
+  const area = (r) => r.reduce((a, p, i) => (i ? a + r[i - 1][0] * p[1] - p[0] * r[i - 1][1] : a), 0); // > 0: counter-clockwise
+  const wind = (r, ccw) => ((area(r) > 0) === ccw ? r : [...r].reverse()); // the hole must wind against the outer ring
+  map.addSource('zones', { type: 'geojson', data: fc(rings.map((r, i) => ({ type: 'Feature', properties: { odd: i % 2 },
+    geometry: { type: 'Polygon', coordinates: i ? [wind(r, true), wind(rings[i - 1], false)] : [wind(r, true)] } }))) });
+  map.addSource('zone-rings', { type: 'geojson', data: fc(rings.map((r) => ({ type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: r } }))) });
+  map.addLayer({ id: 'zones-fill', type: 'fill', source: 'zones', paint: { 'fill-color': '#10069F', 'fill-opacity': ['case', ['==', ['get', 'odd'], 1], 0.1, 0.04] } });
+  map.addLayer({ id: 'zones-line', type: 'line', source: 'zone-rings', paint: { 'line-color': '#10069F', 'line-opacity': 0.35, 'line-width': 1.5 } });
   // label each band midway between its inner and outer ring along two bearings from Charing Cross
-  const O = [-0.1247, 51.5081], kx = Math.cos(deg(O[1]));
+  const O = [-0.1247, 51.5081], kx = Math.cos(O[1] * rad);
   const radial = (ring, b) => {
     let best = Infinity, dist = 0;
-    for (let i = 0; i < ring.length; i += 2) {
-      const x = (ring[i] - O[0]) * kx, y = ring[i + 1] - O[1];
+    for (const [lon, lat] of ring) {
+      const x = (lon - O[0]) * kx, y = lat - O[1];
       const a = Math.atan2(x, y), diff = Math.abs(Math.atan2(Math.sin(a - b), Math.cos(a - b)));
       if (diff < best) (best = diff), (dist = Math.hypot(x, y));
     }
     return dist;
   };
-  const labels = zoneLayer.add(new C.LabelCollection({ scene }));
-  zones.forEach((z, i) => {
-    for (const bd of [35, 215]) {
-      const b = deg(bd), r = (radial(rings[i], b) + (i ? radial(rings[i - 1], b) : 0)) / 2;
-      labels.add({
-        position: C.Cartesian3.fromDegrees(O[0] + (Math.sin(b) * r) / kx, O[1] + Math.cos(b) * r),
-        text: `Zone ${z.zone}`, font: '500 20px Jost, sans-serif', fillColor: C.Color.WHITE,
-        outlineColor: css('#10069F'), outlineWidth: 4, style: C.LabelStyle.FILL_AND_OUTLINE,
-        heightReference: C.HeightReference.CLAMP_TO_GROUND, disableDepthTestDistance: Infinity,
-        distanceDisplayCondition: new C.DistanceDisplayCondition(0, 120000),
-      });
-    }
-  });
+  map.addSource('zone-labels', { type: 'geojson', data: fc(zones.flatMap((z, i) => [35, 215].map((bd) => {
+    const b = bd * rad, r = (radial(rings[i], b) + (i ? radial(rings[i - 1], b) : 0)) / 2;
+    return pt([O[0] + (Math.sin(b) * r) / kx, O[1] + Math.cos(b) * r], { name: `Zone ${z.zone}` });
+  }))) });
+  map.addLayer({ id: 'zones-label', type: 'symbol', source: 'zone-labels', layout: { 'text-field': ['get', 'name'], 'text-font': FONT, 'text-size': 16 },
+    paint: { 'text-color': '#FFFFFF', 'text-halo-color': '#10069F', 'text-halo-width': 2 } });
 }
 
-// ---------------- stations: TfL map style — interchange rings and line-coloured ticks ----------------
-const stationLayer = new C.PrimitiveCollection();
-scene.primitives.add(stationLayer);
-const NEAR = 6000;
-{
-  const points = stationLayer.add(new C.PointPrimitiveCollection());
-  const labels = stationLayer.add(new C.LabelCollection({ scene }));
-  // nearest vertex of a line to a station -> where the tick sits and which way it points
-  function attach(st, line) {
-    let best = Infinity, at = null;
-    for (const s of line.segs) {
-      const c = s.c;
-      for (let i = 0; i < c.length; i += 3) {
-        const d = (c[i] - st.lon) ** 2 + (c[i + 1] - st.lat) ** 2;
-        if (d < best) {
-          best = d;
-          const j = i + 3 < c.length ? i : i - 3;
-          at = { lon: c[i], lat: c[i + 1], h: c[i + 2], dx: (c[j + 3] - c[j]) * Math.cos(deg(st.lat)), dy: c[j + 4] - c[j + 1] };
-        }
+// ---------------- lines: built and planned share one style ----------------
+const WIDTH = { tube: 4, 'elizabeth-line': 5, overground: 3.5, dlr: 3, tram: 3, 'cable-car': 3, 'national-rail': 2, planned: 4 }; // px at zoom 12
+const drawn = (l) => l.segs.some((s) => s.c.length >= 6);
+const lineFeatures = (ls) => ls.flatMap((l) => l.segs.filter((s) => s.c.length >= 6).map((s) => ({
+  type: 'Feature', properties: { line: l.id, colour: l.colour, w: WIDTH[l.mode], t: s.t ? 1 : 0 },
+  geometry: { type: 'LineString', coordinates: lonLats(s.c) },
+})));
+const LINE_STYLE = {
+  type: 'line', layout: { 'line-join': 'round', 'line-cap': 'round' },
+  paint: {
+    'line-color': ['get', 'colour'], 'line-opacity': ['case', ['==', ['get', 't'], 1], 0.5, 1], // tunnels at half strength
+    'line-width': ['interpolate', ['exponential', 1.6], ['zoom'], 9, ['*', ['get', 'w'], 0.4], 12, ['get', 'w'], 16, ['*', ['get', 'w'], 3]],
+  },
+};
+map.addSource('lines', { type: 'geojson', data: fc(lineFeatures(lines)) });
+map.addSource('planned-lines', { type: 'geojson', data: fc(lineFeatures(planned.lines)) });
+map.addLayer({ id: 'lines', source: 'lines', ...LINE_STYLE });
+map.addLayer({ id: 'planned-lines', source: 'planned-lines', ...LINE_STYLE });
+const hidden = new Set(); // line ids switched off in the key
+function setLine(id, bar, show) {
+  if (show) hidden.delete(id); else hidden.add(id);
+  const filter = ['!', ['in', ['get', 'line'], ['literal', [...hidden]]]];
+  map.setFilter('lines', filter);
+  map.setFilter('planned-lines', filter);
+  bar.setAttribute('aria-pressed', String(show));
+}
+
+// trains sit above the lines and below the stations
+map.addSource('trains', { type: 'geojson', data: fc([]) });
+map.addLayer({ id: 'trains', type: 'circle', source: 'trains', paint: {
+  'circle-radius': ['interpolate', ['linear'], ['zoom'], 9, 2, 14, 4.5], 'circle-color': ['get', 'colour'],
+  'circle-stroke-color': '#FFFFFF', 'circle-stroke-width': 1 } });
+
+// ---------------- stations: TfL map style — interchange circles and line-coloured ticks ----------------
+// nearest vertex of a line to a station -> where the tick sits and which way the track runs (deg from north)
+function attach(st, line) {
+  let best = Infinity, at = null;
+  for (const s of line.segs) {
+    const c = s.c;
+    for (let i = 0; i < c.length; i += 3) {
+      const d = (c[i] - st.lon) ** 2 + (c[i + 1] - st.lat) ** 2;
+      if (d < best) {
+        best = d;
+        const j = i + 3 < c.length ? i : i - 3;
+        at = { lon: c[i], lat: c[i + 1], bearing: Math.atan2((c[j + 3] - c[j]) * Math.cos(st.lat * rad), c[j + 4] - c[j + 1]) / rad };
       }
     }
-    return at;
   }
-  for (const st of stations) {
-    const ground = st.h + 3;
-    const interchange = st.lines.length > 1;
-    const line = byId.get(st.lines[0]);
-    if (interchange) {
-      points.add({ id: st, position: C.Cartesian3.fromDegrees(st.lon, st.lat, ground), pixelSize: 7, color: C.Color.WHITE,
-        outlineColor: C.Color.BLACK, outlineWidth: 2, disableDepthTestDistance: Infinity,
-        distanceDisplayCondition: new C.DistanceDisplayCondition(NEAR, 2e5) });
-      gltf('assets/station_interchange.glb', { id: st, modelMatrix: C.Matrix4.multiplyByUniformScale(frame(st.lon, st.lat, ground, 0), 14, new C.Matrix4()),
-        minimumPixelSize: 10, distanceDisplayCondition: new C.DistanceDisplayCondition(0, NEAR) }).then((m) => stationLayer.add(m));
-    } else if (line?.segs.length) {
-      const a = attach(st, line);
-      if (!a) continue;
-      const bearing = (Math.atan2(a.dx, a.dy) * 180) / Math.PI + 90; // perpendicular to the track
-      gltf('assets/station_tick.glb', { id: st, color: css(line.colour), colorBlendMode: C.ColorBlendMode.MIX, colorBlendAmount: 1,
-        modelMatrix: C.Matrix4.multiplyByScale(frame(a.lon, a.lat, a.h + 1, bearing), new C.Cartesian3(28, 14, 4), new C.Matrix4()), // 28 m x 6 m x 1 m bar
-        distanceDisplayCondition: new C.DistanceDisplayCondition(0, NEAR) }).then((m) => stationLayer.add(m));
-      points.add({ id: st, position: C.Cartesian3.fromDegrees(a.lon, a.lat, a.h + 1), pixelSize: 4, color: C.Color.WHITE,
-        outlineColor: css(line.colour), outlineWidth: 1.5, disableDepthTestDistance: Infinity,
-        distanceDisplayCondition: new C.DistanceDisplayCondition(NEAR, 40000) });
-    }
-    labels.add({ id: st, position: C.Cartesian3.fromDegrees(st.lon, st.lat, ground + 8), text: st.name,
-      font: `500 ${interchange ? 15 : 13}px Jost, sans-serif`, fillColor: C.Color.WHITE, outlineColor: css('#1D1D1B'),
-      outlineWidth: 3, style: C.LabelStyle.FILL_AND_OUTLINE, horizontalOrigin: C.HorizontalOrigin.LEFT,
-      pixelOffset: new C.Cartesian2(10, 0), disableDepthTestDistance: Infinity,
-      distanceDisplayCondition: new C.DistanceDisplayCondition(0, interchange ? 9000 : 3500) });
-  }
+  return at;
 }
+// a marker and a label per station; `ref` is the station id a click opens
+function stationFeatures(st, lineIds, ref) {
+  const label = pt([st.lon, st.lat], { ref, kind: 'label', name: st.name, ix: lineIds.length > 1 ? 1 : 0 });
+  if (lineIds.length > 1) return [pt([st.lon, st.lat], { ref, kind: 'ix' }), label];
+  const line = lineOf(lineIds[0]), a = line && attach(st, line);
+  if (!a) return [label];
+  // the tick image is a horizontal bar; rotating it by the track bearing lays it across the track
+  return [pt([a.lon, a.lat], { ref, kind: 'tick', colour: line.colour, icon: `tick${line.colour}`, rot: a.bearing }), label];
+}
+for (const colour of new Set([...lines, ...planned.lines].map((l) => l.colour))) {
+  const ctx = Object.assign(document.createElement('canvas'), { width: 28, height: 10 }).getContext('2d');
+  ctx.fillStyle = colour;
+  ctx.fillRect(0, 0, 28, 10);
+  map.addImage(`tick${colour}`, ctx.getImageData(0, 0, 28, 10), { pixelRatio: 2 });
+}
+// built and planned stations get the same five layers, so they look identical
+function stationLayers(src) {
+  const kind = (k) => ['==', ['get', 'kind'], k];
+  const text = { 'text-field': ['get', 'name'], 'text-font': FONT, 'text-anchor': 'left', 'text-offset': [0.8, 0] };
+  const paint = { 'text-color': '#1D1D1B', 'text-halo-color': '#FFFFFF', 'text-halo-width': 1.5 };
+  const layers = [
+    { id: `${src}-dot`, type: 'circle', source: src, minzoom: 9, maxzoom: 11, filter: kind('tick'), // ticks are too small to read when zoomed out
+      paint: { 'circle-radius': 2.5, 'circle-color': '#FFFFFF', 'circle-stroke-color': ['get', 'colour'], 'circle-stroke-width': 1.5 } },
+    { id: `${src}-tick`, type: 'symbol', source: src, minzoom: 11, filter: kind('tick'),
+      layout: { 'icon-image': ['get', 'icon'], 'icon-rotate': ['get', 'rot'], 'icon-rotation-alignment': 'map', 'icon-allow-overlap': true,
+        'icon-size': ['interpolate', ['linear'], ['zoom'], 11, 0.8, 15, 1.6] } },
+    { id: `${src}-ix`, type: 'circle', source: src, filter: kind('ix'),
+      paint: { 'circle-radius': ['interpolate', ['linear'], ['zoom'], 9, 3, 14, 6], 'circle-color': '#FFFFFF', 'circle-stroke-color': '#000000',
+        'circle-stroke-width': ['interpolate', ['linear'], ['zoom'], 9, 1.5, 14, 2] } },
+    { id: `${src}-label-ix`, type: 'symbol', source: src, minzoom: 12, filter: ['all', kind('label'), ['==', ['get', 'ix'], 1]], layout: { ...text, 'text-size': 13 }, paint },
+    { id: `${src}-label`, type: 'symbol', source: src, minzoom: 13.5, filter: ['all', kind('label'), ['==', ['get', 'ix'], 0]], layout: { ...text, 'text-size': 12 }, paint },
+  ];
+  layers.forEach((l) => map.addLayer(l));
+  return layers.map((l) => l.id);
+}
+map.addSource('stations', { type: 'geojson', data: fc(stations.flatMap((st) => stationFeatures(st, st.lines, st.id))) });
+const STATION_LAYERS = stationLayers('stations');
 
-// ---------------- planned lines (phase 2): dashed, hollow-ring stations, never in journey times ----------------
-const plannedLayer = scene.primitives.add(new C.PrimitiveCollection());
-const plannedPrims = new Map();
+// ---------------- planned lines (phase 2): drawn like built ones, never in journey times ----------------
 const plannedByStation = new Map(); // existing station id -> planned stations there (for card chips)
-const plannedById = new Map(planned.lines.map((l) => [l.id, l]));
-for (const l of planned.lines) {
-  const group = plannedLayer.add(new C.PrimitiveCollection());
-  for (const t of [0, 1]) {
-    const segs = l.segs.filter((s) => s.t === t && s.c.length >= 6);
-    if (!segs.length) continue;
-    group.add(new C.Primitive({
-      geometryInstances: segs.map((s) => new C.GeometryInstance({ geometry: new C.PolylineGeometry({
-        positions: C.Cartesian3.fromDegreesArrayHeights(s.c), width: l.width, arcType: C.ArcType.NONE,
-        vertexFormat: C.PolylineMaterialAppearance.VERTEX_FORMAT }) })),
-      appearance: new C.PolylineMaterialAppearance({ material: C.Material.fromType('PolylineDash', {
-        color: css(l.colour).withAlpha(t ? 0.5 : 1), gapColor: C.Color.TRANSPARENT, dashLength: 20 }) }),
-    }));
-  }
-  plannedPrims.set(l.id, group);
-}
-{
-  const rings = plannedLayer.add(new C.PointPrimitiveCollection());
-  const labels = plannedLayer.add(new C.LabelCollection({ scene }));
-  for (const st of planned.stations) {
-    st.planned = true;
-    if (st.existing) {
-      if (!plannedByStation.has(st.existing)) plannedByStation.set(st.existing, []);
-      plannedByStation.get(st.existing).push(st);
-    }
-    const col = css(plannedById.get(st.lines[0]).colour), pos = C.Cartesian3.fromDegrees(st.lon, st.lat, st.h + 4);
-    rings.add({ id: st, position: pos, pixelSize: 11, color: C.Color.WHITE.withAlpha(0.01), outlineColor: col, outlineWidth: 3,
-      disableDepthTestDistance: Infinity, distanceDisplayCondition: new C.DistanceDisplayCondition(0, 3e5) });
-    if (!st.existing) labels.add({ id: st, position: pos, text: st.name, font: 'italic 500 14px Jost, sans-serif', fillColor: C.Color.WHITE,
-      outlineColor: css('#1D1D1B'), outlineWidth: 3, style: C.LabelStyle.FILL_AND_OUTLINE, horizontalOrigin: C.HorizontalOrigin.LEFT,
-      pixelOffset: new C.Cartesian2(10, 0), disableDepthTestDistance: Infinity, distanceDisplayCondition: new C.DistanceDisplayCondition(0, 60000) });
-  }
-}
-for (const m of planned.models)
-  gltf(`assets/${m.file}`, { modelMatrix: frame(m.lon, m.lat, m.h, m.bearing),
-    distanceDisplayCondition: new C.DistanceDisplayCondition(0, 40000) }).then((mdl) => plannedLayer.add(mdl));
+map.addSource('planned', { type: 'geojson', data: fc(planned.stations.flatMap((st) => {
+  st.planned = true;
+  if (!st.existing) return stationFeatures(st, [...st.lines, ...st.also], st.id);
+  plannedByStation.set(st.existing, [...(plannedByStation.get(st.existing) || []), st]);
+  const ex = stations.find((s) => s.id === st.existing); // gains a line, so it reads as an interchange while planned lines show
+  return ex ? [pt([ex.lon, ex.lat], { ref: ex.id, kind: 'ix' })] : [];
+})) });
+const PLANNED_LAYERS = ['planned-lines', ...stationLayers('planned')];
+let plannedOn = true;
 
 // ---------------- simulated trains ----------------
-const TRAIN_MODEL = { tube: 'train_tube', 'elizabeth-line': 'train_rail', overground: 'train_rail', 'national-rail': 'train_rail', dlr: 'train_dlr', tram: 'train_tram', 'cable-car': 'gondola' };
 const SPEED = { tube: 9, 'elizabeth-line': 14, overground: 11, 'national-rail': 18, dlr: 8, tram: 6, 'cable-car': 5 }; // m/s, average incl. stops
 const HEADWAY = { tube: 200, 'elizabeth-line': 360, overground: 600, 'national-rail': 900, dlr: 300, tram: 420, 'cable-car': 40 }; // s
 const trains = [];
-let trainLayer = null, simTime = 0, speedMult = 10, lastFrame = 0;
-
+let simTime = 0, speedMult = 10, lastFrame = 0, raf = 0;
 function buildTrains() {
-  trainLayer = scene.primitives.add(new C.PrimitiveCollection());
-  const dots = trainLayer.add(new C.PointPrimitiveCollection());
-  for (const l of lines) {
-    for (const r of l.routes) {
-      const pos = [], cum = [0];
-      for (let i = 0; i < r.length; i += 3) pos.push(C.Cartesian3.fromDegrees(r[i], r[i + 1], r[i + 2] + 2));
-      for (let i = 1; i < pos.length; i++) cum.push(cum[i - 1] + C.Cartesian3.distance(pos[i - 1], pos[i]));
-      const L = cum[cum.length - 1];
-      if (L < 500) continue;
-      const v = SPEED[l.mode], n = Math.min(24, Math.max(1, Math.round((2 * L) / (v * HEADWAY[l.mode]))));
-      for (let k = 0; k < n; k++) {
-        const t = { line: l.id, pos, cum, L, v, phase: (k / n) * 2 * L + Math.random() * 200, model: null,
-          dot: dots.add({ pixelSize: 5, color: css(l.colour), outlineColor: C.Color.WHITE, outlineWidth: 1,
-            disableDepthTestDistance: Infinity, distanceDisplayCondition: new C.DistanceDisplayCondition(9000, 2e5) }) };
-        gltf(`assets/${TRAIN_MODEL[l.mode]}.glb`, { color: css(l.colour), colorBlendMode: C.ColorBlendMode.HIGHLIGHT,
-          minimumPixelSize: 30, maximumScale: 25, distanceDisplayCondition: new C.DistanceDisplayCondition(0, 9000) })
-          .then((m) => { t.model = trainLayer.add(m); });
-        trains.push(t);
-      }
-    }
+  for (const l of lines) for (const r of l.routes) {
+    const pts = lonLats(r), cum = [0];
+    for (let i = 1; i < pts.length; i++) cum.push(cum[i - 1] + metres(pts[i - 1], pts[i]));
+    const L = cum.at(-1);
+    if (L < 500) continue;
+    const v = SPEED[l.mode], n = Math.min(24, Math.max(1, Math.round((2 * L) / (v * HEADWAY[l.mode]))));
+    for (let k = 0; k < n; k++) trains.push({ line: l.id, colour: l.colour, pts, cum, L, v, phase: (k / n) * 2 * L + Math.random() * 200 });
   }
   console.log('trains', trains.length);
 }
-
-const sP = new C.Cartesian3(), sF = new C.Cartesian3(), sU = new C.Cartesian3(), sL = new C.Cartesian3();
-function placeTrains() {
+// each train runs to the end of its route and back
+function trainFeatures() {
+  const out = [];
   for (const t of trains) {
-    const visible = linePrims.get(t.line)?.show !== false;
-    t.dot.show = visible;
-    if (t.model) t.model.show = visible;
-    if (!visible) continue;
-    const s = (((t.phase + t.v * simTime) % (2 * t.L)) + 2 * t.L) % (2 * t.L);
-    const fwd = s < t.L, d = fwd ? s : 2 * t.L - s;
+    if (hidden.has(t.line)) continue;
+    const s = (((t.phase + t.v * simTime) % (2 * t.L)) + 2 * t.L) % (2 * t.L), d = s < t.L ? s : 2 * t.L - s;
     let lo = 0, hi = t.cum.length - 1;
     while (hi - lo > 1) { const m = (lo + hi) >> 1; if (t.cum[m] <= d) lo = m; else hi = m; }
-    const seg = t.cum[hi] - t.cum[lo] || 1;
-    C.Cartesian3.lerp(t.pos[lo], t.pos[hi], (d - t.cum[lo]) / seg, sP);
-    C.Cartesian3.normalize(C.Cartesian3.subtract(t.pos[hi], t.pos[lo], sF), sF);
-    if (!fwd) C.Cartesian3.negate(sF, sF);
-    C.Ellipsoid.WGS84.geodeticSurfaceNormal(sP, sU);
-    C.Cartesian3.normalize(C.Cartesian3.cross(sU, sF, sL), sL);
-    C.Cartesian3.cross(sL, sU, sF);
-    C.Cartesian3.add(sP, C.Cartesian3.multiplyByScalar(sL, 3, new C.Cartesian3()), sP); // UK trains keep left
-    t.dot.position = sP;
-    if (t.model) {
-      const m = t.model.modelMatrix;
-      m[0] = sF.x; m[1] = sF.y; m[2] = sF.z; m[3] = 0;
-      m[4] = sL.x; m[5] = sL.y; m[6] = sL.z; m[7] = 0;
-      m[8] = sU.x; m[9] = sU.y; m[10] = sU.z; m[11] = 0;
-      m[12] = sP.x; m[13] = sP.y; m[14] = sP.z; m[15] = 1;
-    }
+    const f = (d - t.cum[lo]) / (t.cum[hi] - t.cum[lo] || 1), a = t.pts[lo], b = t.pts[hi];
+    out.push(pt([a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f], { colour: t.colour }));
   }
+  return out;
 }
-scene.preRender.addEventListener(() => {
-  const now = performance.now();
+// ponytail: setData every frame; throttle to 30 fps if phones stutter
+function animate(now) {
   const dt = lastFrame ? Math.min(0.1, (now - lastFrame) / 1000) : 0;
   lastFrame = now;
-  if (!trainLayer?.show) return;
   simTime += dt * speedMult;
-  placeTrains();
-});
+  map.getSource('trains').setData(fc(trainFeatures()));
+  raf = requestAnimationFrame(animate);
+}
 
 // ---------------- UI ----------------
-const $ = (id) => document.getElementById(id);
 const on = (id, fn) => $(id).addEventListener('change', (e) => fn(e.target.checked));
-
-on('t-zones', (v) => (zoneLayer.show = v));
-on('t-stations', (v) => (stationLayer.show = v));
-on('t-planned', (v) => { plannedLayer.show = v; if (buildings) buildings.style = buildingStyle(v); scene.requestRender(); });
+on('t-zones', (v) => vis(ZONE_LAYERS, v));
+on('t-stations', (v) => vis(STATION_LAYERS, v));
+on('t-planned', (v) => { plannedOn = v; vis(PLANNED_LAYERS, v); });
 on('t-trains', (v) => {
-  if (v && !trainLayer) buildTrains();
-  if (trainLayer) trainLayer.show = v;
-  scene.requestRender();
+  if (v && !trains.length) buildTrains();
+  cancelAnimationFrame(raf);
+  if (v) { lastFrame = 0; raf = requestAnimationFrame(animate); } else map.getSource('trains').setData(fc([]));
 });
 document.querySelectorAll('input[name=speed]').forEach((r) => r.addEventListener('change', () => (speedMult = +r.value)));
-
-let buildings = null;
-// OSM buildings keep their default colours; while planned lines show, those under the Old Oak Common model are hidden.
-// Model footprint: 400 m along the track, 125 m right / 136 m left of it, +20 m margin. Its bearing is ~west, so
-// along = longitude and left = south, and an axis-aligned box is close enough.
-const OOC = planned.models[0] || { lat: 0, lon: 0 }, OOC_DLAT = 1 / 111320, OOC_DLON = OOC_DLAT / Math.cos(deg(OOC.lat));
-const OOC_BOX = [OOC.lat - 156 * OOC_DLAT, OOC.lat + 145 * OOC_DLAT, OOC.lon - 220 * OOC_DLON, OOC.lon + 220 * OOC_DLON];
-const buildingStyle = (hide) => new C.Cesium3DTileStyle({
-  color: "Boolean(${feature['cesium#color']}) ? color(${feature['cesium#color']}) : color('#ffffff')",
-  ...(hide && planned.models.length && { show: `!(\${feature['cesium#latitude']} > ${OOC_BOX[0]} && \${feature['cesium#latitude']} < ${OOC_BOX[1]} && ` +
-    `\${feature['cesium#longitude']} > ${OOC_BOX[2]} && \${feature['cesium#longitude']} < ${OOC_BOX[3]})` }),
-});
-on('t-buildings', async (v) => {
-  if (v && !buildings) {
-    buildings = scene.primitives.add(await C.createOsmBuildingsAsync());
-    buildings.style = buildingStyle(plannedLayer.show);
-  }
-  if (buildings) buildings.show = v;
-});
-on('t-underground', (v) => {
-  const g = scene.globe;
-  g.translucency.enabled = v;
-  g.translucency.frontFaceAlphaByDistance = new C.NearFarScalar(800, 0.25, 40000, 0.75);
-  g.depthTestAgainstTerrain = v;
-  scene.screenSpaceCameraController.enableCollisionDetection = !v;
+on('t-buildings', (v) => {
+  if (map.getLayer('buildings-3d')) return vis(['buildings-3d'], v);
+  if (v) map.addLayer({ id: 'buildings-3d', type: 'fill-extrusion', source: 'openmaptiles', 'source-layer': 'building', minzoom: 13,
+    paint: { 'fill-extrusion-color': '#E4E4E2', 'fill-extrusion-height': ['get', 'render_height'],
+      'fill-extrusion-base': ['get', 'render_min_height'], 'fill-extrusion-opacity': 0.85 } }, 'zones-fill');
 });
 
 $('collapse').addEventListener('click', () => {
@@ -319,7 +234,7 @@ $('collapse').addEventListener('click', () => {
 // key: one bar per line, grouped by mode
 const key = $('key');
 for (const [mode, label] of Object.entries(MODES)) {
-  const group = [...lines, ...planned.lines].filter((l) => l.mode === mode && (linePrims.has(l.id) || plannedPrims.has(l.id)));
+  const group = [...lines, ...planned.lines].filter((l) => l.mode === mode && drawn(l));
   if (!group.length) continue;
   const sec = document.createElement('section');
   sec.className = 'mode' + (mode === 'national-rail' ? ' rail' : '');
@@ -327,7 +242,7 @@ for (const [mode, label] of Object.entries(MODES)) {
   const bars = group.map((l) => {
     const b = document.createElement('button');
     b.type = 'button';
-    b.className = 'bar' + (isLight(l.colour) ? ' light' : '') + (l.mode === 'planned' ? ' planned' : '');
+    b.className = 'bar' + (isLight(l.colour) ? ' light' : '');
     b.style.setProperty('--c', l.colour);
     b.textContent = l.name;
     b.setAttribute('aria-pressed', 'true');
@@ -343,66 +258,69 @@ for (const [mode, label] of Object.entries(MODES)) {
   };
   key.appendChild(sec);
 }
-function setLine(id, bar, show) {
-  (linePrims.get(id) || plannedPrims.get(id)).show = show;
-  bar.setAttribute('aria-pressed', String(show));
-}
 
 // ---------------- station card + journey times ----------------
 const net = buildNetwork(graph, stations, (id) => byId.get(id)?.mode);
 const stationIndex = new Map(stations.map((st, i) => [st, i]));
-const isoLayer = scene.primitives.add(new C.PrimitiveCollection());
-const isoDots = isoLayer.add(new C.PointPrimitiveCollection());
-const isoLabels = isoLayer.add(new C.LabelCollection({ scene }));
-const isoOutlines = isoLayer.add(new C.PrimitiveCollection());
-let isoImagery = null, isoField = null; // isoField: the shown grid + origin, for the hover tooltip
 // Grid the reachable-area map is computed on: ~100 m cells over the whole network
 const GRID = gridFor(stations);
+let isoField = null; // the shown grid + origin, for the hover tooltip
+map.addSource('iso-contours', { type: 'geojson', data: fc([]) });
+map.addLayer({ id: 'iso-contours', type: 'line', source: 'iso-contours', paint: { 'line-color': '#FFFFFF', 'line-opacity': 0.9, 'line-width': 1.5 } }, 'lines');
+map.addSource('iso', { type: 'geojson', data: fc([]) });
+map.addImage('tag', { width: 16, height: 16, data: new Uint8Array(16 * 16 * 4).map((_, i) => [16, 6, 159, 255][i % 4]) }); // TfL blue, stretched behind the "from" name (1 px would blur into a glow)
+const isDot = ['==', ['get', 'kind'], 'dot'], isOrigin = ['==', ['get', 'kind'], 'origin'];
+const darkText = { 'text-color': '#1D1D1B', 'text-halo-color': '#FFFFFF', 'text-halo-width': 1.5 };
+map.addLayer({ id: 'iso-dots', type: 'circle', source: 'iso', minzoom: 12.3, filter: isDot,
+  paint: { 'circle-radius': 3, 'circle-color': '#FFFFFF', 'circle-stroke-color': '#1D1D1B', 'circle-stroke-width': 1.5 } });
+map.addLayer({ id: 'iso-labels', type: 'symbol', source: 'iso', minzoom: 13.3, filter: isDot,
+  layout: { 'text-field': ['get', 'name'], 'text-font': FONT, 'text-size': 12, 'text-anchor': 'top', 'text-offset': [0, 0.8] }, paint: darkText });
+map.addLayer({ id: 'iso-origin', type: 'circle', source: 'iso', filter: isOrigin,
+  paint: { 'circle-radius': 8, 'circle-color': '#FFFFFF', 'circle-stroke-color': '#DA291C', 'circle-stroke-width': 4 } });
+map.addLayer({ id: 'iso-origin-label', type: 'symbol', source: 'iso', filter: isOrigin, layout: {
+  'text-field': ['get', 'name'], 'text-font': FONT, 'text-size': 16, 'text-anchor': 'bottom', 'text-offset': [0, -1.1], 'text-allow-overlap': true,
+  'icon-image': 'tag', 'icon-text-fit': 'both', 'icon-text-fit-padding': [5, 9, 5, 9], 'icon-allow-overlap': true }, paint: { 'text-color': '#FFFFFF' } });
 
-// Shade every band on the ground (an image draped on the terrain) and outline it with smooth contours.
-async function drawReachableArea(times, from) {
+// Shade every band (an image over the grid's corners) and outline it with smooth contours.
+function drawReachableArea(times, from) {
   const { field, W, H } = isochroneGrid(stations, times, GRID, BANDS.at(-1).max);
   isoField = { field, W, H, from };
   const canvas = Object.assign(document.createElement('canvas'), { width: W, height: H });
   const ctx = canvas.getContext('2d'), img = ctx.createImageData(W, H);
   const rgb = BANDS.map((b) => [1, 3, 5].map((i) => parseInt(b.colour.slice(i, i + 2), 16)));
-  for (let i = 0; i < field.length; i++) {
-    const b = BANDS.findIndex((x) => field[i] <= x.max);
-    if (b < 0) continue;
-    img.data.set([...rgb[b], 255], i * 4);
+  const rows = mercatorRows(GRID, H); // the map stretches the image in Mercator; resample so bands sit where the tooltip says
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const b = BANDS.findIndex((k) => field[rows[y] * W + x] <= k.max);
+    if (b >= 0) img.data.set([...rgb[b], 255], (y * W + x) * 4);
   }
   ctx.putImageData(img, 0, 0);
-  const provider = await C.SingleTileImageryProvider.fromUrl(canvas.toDataURL(), {
-    rectangle: C.Rectangle.fromDegrees(GRID.w, GRID.s, GRID.e, GRID.n),
-  });
-  if (isoImagery) viewer.imageryLayers.remove(isoImagery);
-  isoImagery = viewer.imageryLayers.addImageryProvider(provider);
-  isoImagery.alpha = 0.72;
+  const url = canvas.toDataURL(), coordinates = [[GRID.w, GRID.n], [GRID.e, GRID.n], [GRID.e, GRID.s], [GRID.w, GRID.s]];
+  if (map.getSource('iso-image')) map.getSource('iso-image').updateImage({ url, coordinates });
+  else {
+    map.addSource('iso-image', { type: 'image', url, coordinates });
+    map.addLayer({ id: 'iso-image', type: 'raster', source: 'iso-image', paint: { 'raster-opacity': 0.72, 'raster-fade-duration': 0 } }, 'iso-contours');
+  }
+  vis(['iso-image'], true);
 
   // contour lines: d3 fills "value >= threshold", so contour the negated times
   const neg = Float64Array.from(field, (v) => (Number.isFinite(v) ? -v : -1e4));
   const toLL = ([x, y]) => [GRID.w + (x / W) * (GRID.e - GRID.w), GRID.n - (y / H) * (GRID.n - GRID.s)];
-  isoOutlines.removeAll();
-  const instances = [];
+  const outlines = [];
   for (const band of BANDS) {
     const [mp] = contours().size([W, H]).thresholds([-band.max])(neg);
-    for (const poly of mp.coordinates) for (const ring of poly) {
-      if (ring.length < 8) continue;
-      instances.push(new C.GeometryInstance({
-        geometry: new C.GroundPolylineGeometry({ positions: C.Cartesian3.fromDegreesArray(ring.flatMap(toLL)), width: 1.5 }),
-        attributes: { color: C.ColorGeometryInstanceAttribute.fromColor(C.Color.WHITE.withAlpha(0.9)) },
-      }));
-    }
+    for (const poly of mp.coordinates) for (const ring of poly)
+      if (ring.length >= 8) outlines.push({ type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: ring.map(toLL) } });
   }
-  if (instances.length) isoOutlines.add(new C.GroundPolylinePrimitive({ geometryInstances: instances, appearance: new C.PolylineColorAppearance() }));
+  map.getSource('iso-contours').setData(fc(outlines));
 }
 const fmt = (m) => (m < 60 ? `${Math.round(m)} min` : `${Math.floor(m / 60)} h ${String(Math.round(m % 60)).padStart(2, '0')}`);
+const flyTo = (st) => map.flyTo({ center: [st.lon, st.lat], zoom: 11, pitch: 45, duration: 1500 });
 
 const plannedChip = (id) => {
-  const l = plannedById.get(id) || byId.get(id), li = document.createElement('li');
+  const l = lineOf(id), li = document.createElement('li');
   li.textContent = `${l?.name || id} (planned)`;
-  li.className = 'planned';
   li.style.setProperty('--c', l?.colour || '#777');
+  if (l && isLight(l.colour)) li.className = 'light';
   return li;
 };
 // Planned-only station: badge + opening text, no journey times (they cover today's network only)
@@ -414,7 +332,7 @@ function selectPlanned(st, fly) {
   $('card-lines').replaceChildren(...st.lines.map(plannedChip), ...st.also.map(plannedChip));
   $('card-times').closest('.times').hidden = true;
   $('card').hidden = false;
-  if (fly) viewer.camera.flyTo({ destination: C.Cartesian3.fromDegrees(st.lon, st.lat - 0.16, 16000), orientation: { heading: 0, pitch: deg(-45), roll: 0 }, duration: 1.5 });
+  if (fly) flyTo(st);
 }
 
 function selectStation(st, fly = false) {
@@ -428,36 +346,24 @@ function selectStation(st, fly = false) {
     if (l && isLight(l.colour)) li.className = 'light';
     return li;
   }));
-  if (plannedLayer.show) for (const p of plannedByStation.get(st.id) || []) $('card-lines').append(...p.lines.map(plannedChip));
+  if (plannedOn) for (const p of plannedByStation.get(st.id) || []) $('card-lines').append(...p.lines.map(plannedChip));
   $('card-times').closest('.times').hidden = false;
   $('card').hidden = false;
-  if (fly) viewer.camera.flyTo({ destination: C.Cartesian3.fromDegrees(st.lon, st.lat - 0.16, 16000), orientation: { heading: 0, pitch: deg(-45), roll: 0 }, duration: 1.5 });
+  if (fly) flyTo(st);
 
   // reachable area: rail (with changes between lines) then a walk from the station
   const origin = stationIndex.get(st), times = travelTimes(net, origin);
-  isoDots.removeAll(); isoLabels.removeAll();
-  stationLayer.show = zoneLayer.show = false; // markers and zone rings would clutter the shaded bands
+  vis([...STATION_LAYERS, ...ZONE_LAYERS], false); // markers and zone rings would clutter the shaded bands
   drawReachableArea(times, st.name);
-  const groups = BANDS.map(() => []);
+  const groups = BANDS.map(() => []), iso = [];
   stations.forEach((s, i) => {
     const t = times[i], b = BANDS.findIndex((x) => t <= x.max);
     if (b < 0) return;
-    const pos = C.Cartesian3.fromDegrees(s.lon, s.lat, s.h + 6);
-    if (i === origin) {
-      isoDots.add({ id: s, position: pos, pixelSize: 16, color: C.Color.WHITE, outlineColor: css('#DA291C'), outlineWidth: 4, disableDepthTestDistance: Infinity });
-      // the "from" station: a TfL-blue name tag above the dot, visible at every zoom
-      isoLabels.add({ position: pos, text: s.name, font: '500 16px Jost, sans-serif', fillColor: C.Color.WHITE,
-        showBackground: true, backgroundColor: css('#10069F'), backgroundPadding: new C.Cartesian2(9, 5),
-        pixelOffset: new C.Cartesian2(0, -16), verticalOrigin: C.VerticalOrigin.BOTTOM, disableDepthTestDistance: Infinity });
-      return;
-    }
+    if (i === origin) { iso.push(pt([s.lon, s.lat], { ref: s.id, kind: 'origin', name: s.name })); return; }
     groups[b].push([t, s]);
-    isoDots.add({ id: s, position: pos, pixelSize: 6, color: C.Color.WHITE, outlineColor: css('#1D1D1B'), outlineWidth: 1.5,
-      disableDepthTestDistance: Infinity, distanceDisplayCondition: new C.DistanceDisplayCondition(0, 9000) });
-    isoLabels.add({ position: pos, text: `${s.name} ${fmt(t)}`, font: '500 12px Jost, sans-serif', fillColor: C.Color.WHITE,
-      outlineColor: css('#1D1D1B'), outlineWidth: 3, style: C.LabelStyle.FILL_AND_OUTLINE, pixelOffset: new C.Cartesian2(0, 14),
-      disableDepthTestDistance: Infinity, distanceDisplayCondition: new C.DistanceDisplayCondition(0, 7000) });
+    iso.push(pt([s.lon, s.lat], { ref: s.id, kind: 'dot', name: `${s.name} ${fmt(t)}` }));
   });
+  map.getSource('iso').setData(fc(iso));
   $('card-times').replaceChildren(...BANDS.map((band, b) => {
     const list = groups[b].sort((x, y) => x[0] - y[0]);
     const prev = b ? BANDS[b - 1].max : 0;
@@ -473,28 +379,26 @@ function selectStation(st, fly = false) {
     }));
     return li;
   }));
-  scene.requestRender();
 }
 function clearSelection() {
   $('card').hidden = true;
-  isoDots.removeAll(); isoLabels.removeAll(); isoOutlines.removeAll();
-  if (isoImagery) viewer.imageryLayers.remove(isoImagery);
-  isoImagery = isoField = null;
+  map.getSource('iso').setData(fc([]));
+  map.getSource('iso-contours').setData(fc([]));
+  if (map.getLayer('iso-image')) vis(['iso-image'], false);
+  isoField = null;
   $('tip').hidden = true;
-  stationLayer.show = $('t-stations').checked;
-  zoneLayer.show = $('t-zones').checked;
+  vis(STATION_LAYERS, $('t-stations').checked);
+  vis(ZONE_LAYERS, $('t-zones').checked);
 }
 
-// journey time of the reachable-area grid cell under a screen point (hover, or tap on touch screens)
+// journey time of the reachable-area grid cell under a point (hover, or tap on touch screens)
 const tip = $('tip');
-function showTip(p) {
-  const hit = isoField && scene.globe.pick(viewer.camera.getPickRay(p), scene);
-  const ll = hit && C.Cartographic.fromCartesian(hit);
+function showTip(p, ll) {
   let t = Infinity;
-  if (ll) {
+  if (isoField) {
     const { field, W, H } = isoField;
-    const x = Math.floor(((C.Math.toDegrees(ll.longitude) - GRID.w) / (GRID.e - GRID.w)) * W);
-    const y = Math.floor(((GRID.n - C.Math.toDegrees(ll.latitude)) / (GRID.n - GRID.s)) * H);
+    const x = Math.floor(((ll.lng - GRID.w) / (GRID.e - GRID.w)) * W);
+    const y = Math.floor(((GRID.n - ll.lat) / (GRID.n - GRID.s)) * H);
     if (x >= 0 && x < W && y >= 0 && y < H) t = field[y * W + x];
   }
   const band = BANDS.find((b) => t <= b.max);
@@ -504,16 +408,18 @@ function showTip(p) {
   tip.style.left = `${p.x}px`; tip.style.top = `${p.y}px`;
   tip.hidden = false;
 }
-const handler = new C.ScreenSpaceEventHandler(scene.canvas);
-handler.setInputAction((e) => {
-  let st = scene.pick(e.position)?.id;
-  if (st?.planned && st.existing) st = stations.find((s) => s.id === st.existing); // e.g. Euston: today's station + planned chip
-  if (st?.lines) selectStation(st);
-  else showTip(e.position);
-}, C.ScreenSpaceEventType.LEFT_CLICK);
-handler.setInputAction((e) => showTip(e.endPosition), C.ScreenSpaceEventType.MOUSE_MOVE);
+const stationByRef = new Map([...stations, ...planned.stations].map((s) => [s.id, s]));
+const CLICKABLE = [...STATION_LAYERS, ...PLANNED_LAYERS.slice(1), 'iso-dots', 'iso-origin'];
+map.on('click', (e) => {
+  const { x, y } = e.point;
+  const f = map.queryRenderedFeatures([[x - 6, y - 6], [x + 6, y + 6]], { layers: CLICKABLE })[0];
+  const st = f && stationByRef.get(f.properties.ref); // a planned marker at e.g. Euston opens today's station
+  if (st) selectStation(st);
+  else showTip(e.point, e.lngLat);
+});
+map.on('mousemove', (e) => showTip(e.point, e.lngLat));
+map.getCanvas().addEventListener('mouseleave', () => { tip.hidden = true; });
 $('card-close').onclick = clearSelection;
-scene.canvas.addEventListener('mouseleave', () => { tip.hidden = true; });
 
 // station search: native datalist over unique station names
 const byName = new Map();
@@ -522,8 +428,8 @@ for (const st of planned.stations) if (!st.existing && !byName.has(st.name)) byN
 $('station-list').append(...[...byName.keys()].sort().map((n) => Object.assign(document.createElement('option'), { value: n })));
 $('station-search').addEventListener('change', (e) => {
   const st = byName.get(e.target.value.trim());
-  if (st && (plannedLayer.show || !st.planned || st.existing)) { selectStation(st, true); e.target.blur(); }
+  if (st && (plannedOn || !st.planned || st.existing)) { selectStation(st, true); e.target.blur(); }
 });
 
 $('loading').classList.add('done');
-window.__map = { viewer, lines, trains }; // handy for debugging in the console
+window.__map = { map, lines, trains }; // handy for debugging in the console

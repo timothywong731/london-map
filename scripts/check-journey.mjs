@@ -2,7 +2,7 @@
 import fs from 'node:fs';
 import assert from 'node:assert/strict';
 import { LINES, OPERATORS } from '../lines.js';
-import { buildNetwork, travelTimes, isochroneGrid, gridFor } from '../journey.js';
+import { buildNetwork, travelTimes, isochroneGrid, gridFor, mercatorRows } from '../journey.js';
 
 const read = (f) => JSON.parse(fs.readFileSync(`data/${f}.json`, 'utf8'));
 const stations = read('stations'), graph = read('graph');
@@ -47,3 +47,10 @@ for (const name of ['Reading', 'Shenfield', 'Heathrow Terminal 5']) {
 }
 console.log('grid', W, 'x', H, 'cells');
 console.log('ok');
+// the shaded image is laid on a Web Mercator map: rows are resampled so mid-image sits slightly north of mid-latitude
+{
+  const G = gridFor(stations), H = 600, rows = mercatorRows(G, H);
+  assert.equal(rows[0], 0, 'first Mercator row samples the north edge');
+  assert.equal(rows[H - 1], H - 1, 'last Mercator row samples the south edge');
+  assert.ok(rows[H / 2] < H / 2 && rows[H / 2] > H / 2 - 10, `mid Mercator row samples grid row ${rows[H / 2]}`);
+}

@@ -110,3 +110,15 @@ export function isochroneGrid(stations, times, g, maxMin) {
   });
   return { field, W, H };
 }
+
+// Image overlays are stretched linearly in Web Mercator, but grid rows are linear in latitude.
+// For each row of a Mercator-spaced image of H rows (north first), the grid row to sample.
+export function mercatorRows(g, H) {
+  const merc = (lat) => Math.log(Math.tan(Math.PI / 4 + (lat * Math.PI) / 360));
+  const yn = merc(g.n), ys = merc(g.s), rows = new Int32Array(H);
+  for (let r = 0; r < H; r++) {
+    const lat = ((2 * Math.atan(Math.exp(yn + ((r + 0.5) / H) * (ys - yn))) - Math.PI / 2) * 180) / Math.PI;
+    rows[r] = Math.min(H - 1, Math.max(0, Math.floor(((g.n - lat) / (g.n - g.s)) * H)));
+  }
+  return rows;
+}
