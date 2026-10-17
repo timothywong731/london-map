@@ -122,3 +122,39 @@ export function mercatorRows(g, H) {
   }
   return rows;
 }
+
+// Planned lines (data/planned.json) as extra journey-graph edges. Stops at an existing station
+// reuse it; planned-only stops are appended after today's stations, so today's indices still hold.
+// Run time follows the bake's rule (0.6 min a stop + 1.1 x straight-line distance at running speed);
+// waits and platform walks borrow those of the mode named in `like`.
+// ponytail: speeds tuned to published end-to-end times (HS2 Euston-Curzon Street 45-49 min).
+export const PLANNED_RUN = { hs2: { like: 'national-rail', kmh: 260 }, 'west-london-orbital': { like: 'overground', kmh: 45 } };
+export function withPlanned(graph, stations, planned, run) {
+  const all = [...stations], lines = [...graph.lines], edges = [...graph.edges];
+  const at = new Map(stations.map((s, i) => [s.id, i]));
+  const index = (p) => {
+    if (p.existing) return at.get(p.existing);
+    if (!at.has(p.id)) at.set(p.id, all.push(p) - 1);
+    return at.get(p.id);
+  };
+  const k = Math.cos((51.5 * Math.PI) / 180) * 111320;
+  const km = (a, b) => Math.hypot((all[a].lon - all[b].lon) * k, (all[a].lat - all[b].lat) * 111320) / 1000;
+  const link = (a, b, l, m) => { m = Math.round(m * 10) / 10; edges.push([a, b, l, m], [b, a, l, m]); };
+  for (const line of planned.lines) {
+    const l = lines.push(line.id) - 1;
+    const stops = planned.stations.filter((s) => s.lines.includes(line.id)).map(index); // baked in route order
+    for (let i = 1; i < stops.length; i++) link(stops[i - 1], stops[i], l, 0.6 + ((km(stops[i - 1], stops[i]) * 1.1) / run[line.id].kmh) * 60);
+  }
+  // a planned stop on a line running today (Old Oak Common on the Elizabeth line): every service
+  // pattern passing it calls there, so each edge running within ~0.5 km of it gains the stop
+  for (const p of planned.stations) for (const id of p.also) {
+    const l = lines.indexOf(id), P = index(p);
+    for (const [a, b, el, m] of graph.edges) {
+      if (el !== l || a > b || km(a, P) + km(P, b) - km(a, b) > 0.5) continue;
+      const share = km(a, P) / (km(a, P) + km(P, b));
+      link(a, P, l, 0.6 + (m - 0.6) * share);
+      link(P, b, l, 0.6 + (m - 0.6) * (1 - share));
+    }
+  }
+  return { graph: { lines, edges }, stations: all };
+}

@@ -2,7 +2,7 @@
 import fs from 'node:fs';
 import assert from 'node:assert/strict';
 import { LINES, OPERATORS } from '../lines.js';
-import { buildNetwork, travelTimes, isochroneGrid, gridFor, mercatorRows } from '../journey.js';
+import { buildNetwork, travelTimes, isochroneGrid, gridFor, mercatorRows, withPlanned, PLANNED_RUN } from '../journey.js';
 
 const read = (f) => JSON.parse(fs.readFileSync(`data/${f}.json`, 'utf8'));
 const stations = read('stations'), graph = read('graph');
@@ -54,3 +54,20 @@ console.log('ok');
   assert.equal(rows[H - 1], H - 1, 'last Mercator row samples the south edge');
   assert.ok(rows[H / 2] < H / 2 && rows[H / 2] > H / 2 - 10, `mid Mercator row samples grid row ${rows[H / 2]}`);
 }
+// planned lines join the network: HS2 near its published 45-49 min, the WLO a real shortcut
+{
+  const P = withPlanned(graph, stations, read('planned'), PLANNED_RUN);
+  const pnet = buildNetwork(P.graph, P.stations, (id) => modes.get(id) ?? PLANNED_RUN[id].like);
+  const at = (name) => { const i = P.stations.findIndex((s) => s.name === name); assert.ok(i >= 0, name); return i; };
+  const euston = travelTimes(pnet, at('Euston'))[at('Birmingham Curzon Street')];
+  console.log(`Euston -> Birmingham Curzon Street (planned): ${euston.toFixed(1)} min`);
+  assert.ok(euston >= 40 && euston <= 55, `HS2 Euston -> Curzon Street = ${euston.toFixed(1)}`);
+  const today = travelTimes(net, idx('Hendon'))[idx('Hounslow')], wlo = travelTimes(pnet, at('Hendon'))[at('Hounslow')];
+  console.log(`Hendon -> Hounslow: today ${today.toFixed(1)}, with WLO ${wlo.toFixed(1)} min`);
+  assert.ok(wlo < today - 15, 'the WLO cuts Hendon -> Hounslow by well over 15 min');
+  const ooc = travelTimes(pnet, at('Old Oak Common'))[at('Paddington')];
+  console.log(`Old Oak Common -> Paddington (Elizabeth line): ${ooc.toFixed(1)} min`);
+  assert.ok(ooc < 20, 'Old Oak Common is an Elizabeth line stop (6 min ride + platform walks and wait)');
+  assert.equal(P.stations.length, stations.length + read('planned').stations.filter((s) => !s.existing).length, 'stops at existing stations reuse them');
+}
+console.log('planned ok');

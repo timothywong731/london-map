@@ -1,5 +1,5 @@
 import { MODES } from './lines.js';
-import { BANDS, buildNetwork, travelTimes, isochroneGrid, gridFor, mercatorRows } from './journey.js';
+import { BANDS, buildNetwork, travelTimes, isochroneGrid, gridFor, mercatorRows, withPlanned, PLANNED_RUN } from './journey.js';
 import { contours } from 'https://cdn.jsdelivr.net/npm/d3-contour@4.0.2/+esm';
 
 const $ = (id) => document.getElementById(id);
@@ -213,7 +213,11 @@ function animate(now) {
 const on = (id, fn) => $(id).addEventListener('change', (e) => fn(e.target.checked));
 on('t-zones', (v) => vis(ZONE_LAYERS, v));
 on('t-stations', (v) => vis(STATION_LAYERS, v));
-on('t-planned', (v) => { plannedOn = v; vis(PLANNED_LAYERS, v); });
+on('t-planned', (v) => {
+  plannedOn = v;
+  vis(PLANNED_LAYERS, v);
+  if (current && !$('card').hidden) (current.planned && !v ? clearSelection() : selectStation(current)); // times change with the network
+});
 on('t-trains', (v) => {
   if (v && !trains.length) buildTrains();
   cancelAnimationFrame(raf);
@@ -262,9 +266,12 @@ for (const [mode, label] of Object.entries(MODES)) {
 }
 
 // ---------------- station card + journey times ----------------
-const net = buildNetwork(graph, stations, (id) => byId.get(id)?.mode);
-const stationIndex = new Map(stations.map((st, i) => [st, i]));
-// Grid the reachable-area map is computed on: ~100 m cells over the whole network
+// two networks: today's, and today's plus the planned lines (used while "Planned lines" is on)
+const modeOf = (id) => byId.get(id)?.mode ?? PLANNED_RUN[id]?.like;
+const network = ({ graph, stations }) => ({ net: buildNetwork(graph, stations, modeOf), stations, index: new Map(stations.map((st, i) => [st, i])) });
+const NETS = { today: network({ graph, stations }), planned: network(withPlanned(graph, stations, planned, PLANNED_RUN)) };
+// Grid the reachable-area map is computed on: ~100 m cells over today's network
+// ponytail: HS2's Birmingham stops fall outside it, so they're listed in the bands but not shaded
 const GRID = gridFor(stations);
 let isoField = null; // the shown grid + origin, for the hover tooltip
 map.addSource('iso-contours', { type: 'geojson', data: fc([]) });
@@ -284,8 +291,8 @@ map.addLayer({ id: 'iso-origin-label', type: 'symbol', source: 'iso', filter: is
   'icon-image': 'tag', 'icon-text-fit': 'both', 'icon-text-fit-padding': [5, 9, 5, 9], 'icon-allow-overlap': true }, paint: { 'text-color': '#FFFFFF' } });
 
 // Shade every band (an image over the grid's corners) and outline it with smooth contours.
-function drawReachableArea(times, from) {
-  const { field, W, H } = isochroneGrid(stations, times, GRID, BANDS.at(-1).max);
+function drawReachableArea(list, times, from) {
+  const { field, W, H } = isochroneGrid(list, times, GRID, BANDS.at(-1).max);
   isoField = { field, W, H, from };
   const canvas = Object.assign(document.createElement('canvas'), { width: W, height: H });
   const ctx = canvas.getContext('2d'), img = ctx.createImageData(W, H);
@@ -325,40 +332,36 @@ const plannedChip = (id) => {
   if (l && isLight(l.colour)) li.className = 'light';
   return li;
 };
-// Planned-only station: badge + opening text, no journey times (they cover today's network only)
-function selectPlanned(st, fly) {
-  clearSelection();
-  $('card-name').textContent = st.name;
-  $('card-zone').innerHTML = '<span class="badge">Planned</span> ';
-  $('card-zone').append(st.opens);
-  $('card-lines').replaceChildren(...st.lines.map(plannedChip), ...st.also.map(plannedChip));
-  $('card-times').closest('.times').hidden = true;
-  $('card').hidden = false;
-  if (fly) flyTo(st);
-}
-
+let current = null; // the station on the card, re-run when the planned switch flips
 function selectStation(st, fly = false) {
-  if (st.planned && !st.existing) return selectPlanned(st, fly);
+  current = st;
   $('card-name').textContent = st.name;
-  $('card-zone').textContent = st.zones.length ? `Zone ${st.zones.join('/')}` : 'Outside the fare zones';
-  $('card-lines').replaceChildren(...st.lines.map((id) => {
-    const l = byId.get(id), li = document.createElement('li');
-    li.textContent = l?.name || id;
-    li.style.setProperty('--c', l?.colour || '#777');
-    if (l && isLight(l.colour)) li.className = 'light';
-    return li;
-  }));
-  if (plannedOn) for (const p of plannedByStation.get(st.id) || []) $('card-lines').append(...p.lines.map(plannedChip));
-  $('card-times').closest('.times').hidden = false;
+  if (st.planned) { // planned-only station: badge + opening text
+    $('card-zone').innerHTML = '<span class="badge">Planned</span> ';
+    $('card-zone').append(st.opens);
+    $('card-lines').replaceChildren(...st.lines.map(plannedChip), ...st.also.map(plannedChip));
+  } else {
+    $('card-zone').textContent = st.zones.length ? `Zone ${st.zones.join('/')}` : 'Outside the fare zones';
+    $('card-lines').replaceChildren(...st.lines.map((id) => {
+      const l = byId.get(id), li = document.createElement('li');
+      li.textContent = l?.name || id;
+      li.style.setProperty('--c', l?.colour || '#777');
+      if (l && isLight(l.colour)) li.className = 'light';
+      return li;
+    }));
+    if (plannedOn) for (const p of plannedByStation.get(st.id) || []) $('card-lines').append(...p.lines.map(plannedChip));
+  }
+  $('card-planned-hint').hidden = !plannedOn;
   $('card').hidden = false;
   if (fly) flyTo(st);
 
   // reachable area: rail (with changes between lines) then a walk from the station
-  const origin = stationIndex.get(st), times = travelTimes(net, origin);
+  const N = plannedOn ? NETS.planned : NETS.today;
+  const origin = N.index.get(st), times = travelTimes(N.net, origin);
   vis([...STATION_LAYERS, ...ZONE_LAYERS], false); // markers and zone rings would clutter the shaded bands
-  drawReachableArea(times, st.name);
+  drawReachableArea(N.stations, times, st.name);
   const groups = BANDS.map(() => []), iso = [];
-  stations.forEach((s, i) => {
+  N.stations.forEach((s, i) => {
     const t = times[i], b = BANDS.findIndex((x) => t <= x.max);
     if (b < 0) return;
     if (i === origin) { iso.push(pt([s.lon, s.lat], { ref: s.id, kind: 'origin', name: s.name })); return; }
