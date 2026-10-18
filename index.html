@@ -64,17 +64,22 @@
   </aside>
 
   <article id="card" hidden aria-live="polite">
+    <h2><button id="card-fold" class="fold" aria-expanded="true" title="Hide details"><span id="card-name"></span>
+      <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M6 15l6-6 6 6" fill="none" stroke="currentColor" stroke-width="2.2"/></svg>
+    </button></h2>
     <button class="icon close" id="card-close" title="Close">
       <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2.2"/></svg>
     </button>
-    <h2 id="card-name"></h2>
     <p id="card-zone"></p>
     <ul id="card-lines"></ul>
     <section class="times" aria-label="Journey times">
       <h3>Journey times from here</h3>
       <ul id="card-times"></ul>
-      <p class="hint">Shaded area: reachable by rail, then up to 20 min on foot. Estimates include platform walks, waits and changes between lines.</p>
-      <p class="hint" id="card-planned-hint" hidden>Includes the planned lines (HS2, West London Orbital) as if they were running today. Turn off Planned lines for today's network.</p>
+      <details class="about" open>
+        <summary>About these times</summary>
+        <p class="hint">Shaded area: reachable by rail, then up to 20 min on foot. Estimates include platform walks, waits and changes between lines.</p>
+        <p class="hint" id="card-planned-hint" hidden>Includes the planned lines (HS2, West London Orbital) as if they were running today. Turn off Planned lines for today's network.</p>
+      </details>
     </section>
   </article>
 

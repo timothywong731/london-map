@@ -23,7 +23,7 @@ button.icon:hover { background: rgba(255,255,255,.15); }
   display: flex; flex-direction: column; background: var(--paper); border-radius: 10px;
   box-shadow: 0 6px 24px rgba(0, 10, 40, .35); overflow: hidden; z-index: 2;
 }
-.brand { display: flex; align-items: center; gap: 10px; padding: 10px 10px 10px 14px; background: var(--tfl-blue); color: #fff; }
+.brand { display: flex; align-items: center; gap: 10px; padding: 10px 10px 10px 14px; background: var(--tfl-blue); color: #fff; cursor: pointer; }
 .brand h1 { font-size: 19px; font-weight: 500; margin: 0; flex: 1; letter-spacing: .01em; }
 .mark { flex: none; border-radius: 7px; box-shadow: 0 0 0 1.5px rgba(255,255,255,.6); }
 #collapse svg { transition: transform .2s; }
@@ -47,11 +47,21 @@ section { padding: 10px 14px; border-bottom: 1px solid var(--rule); }
 .speed input:checked + span { background: var(--tfl-blue); color: #fff; }
 .speed input:focus-visible + span { outline: 3px solid #FFCD00; }
 
-/* key: each line is a bar in its own colour, like the TfL map key */
-.mode { padding: 10px 14px 4px; }
-.mode-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 6px; }
-.mode-head h2 { font-size: 15px; font-weight: 600; margin: 0; }
-.mode-head button { border: 0; background: none; color: var(--tfl-blue); font: 500 13px var(--font); cursor: pointer; padding: 2px 4px; }
+/* key: each line is a bar in its own colour, like the TfL map key; a folded group shows its colours as swatches */
+.mode { position: relative; padding: 0 14px; }
+.mode summary { display: flex; align-items: center; gap: 8px; padding: 10px 72px 10px 0; cursor: pointer; list-style: none; }
+.mode summary::-webkit-details-marker { display: none; }
+.mode summary::before, .about summary::before {
+  content: ''; flex: none; width: 6px; height: 6px; margin: 0 2px; border: solid var(--muted); border-width: 0 1.5px 1.5px 0;
+  transform: rotate(-45deg); transition: transform .15s;
+}
+.mode details[open] > summary::before, .about[open] > summary::before { transform: rotate(45deg); }
+.mode h2 { font-size: 15px; font-weight: 600; margin: 0; flex: none; }
+.swatches { display: flex; gap: 2px; min-width: 0; overflow: hidden; }
+.swatches i { flex: none; width: 10px; height: 10px; border-radius: 2px; background: var(--c); }
+.mode details[open] .swatches { display: none; }
+.mode details[open] { padding-bottom: 6px; }
+.mode .all { position: absolute; right: 10px; top: 8px; border: 0; background: none; color: var(--tfl-blue); font: 500 13px var(--font); cursor: pointer; padding: 2px 4px; }
 .bar {
   display: block; width: 100%; border: 0; text-align: left; cursor: pointer; margin: 0 0 3px;
   padding: 3px 10px; border-radius: 3px; font: 500 14px/1.35 var(--font); color: #fff;
@@ -74,7 +84,14 @@ section { padding: 10px 14px; border-bottom: 1px solid var(--rule); }
   position: absolute; right: 16px; top: 16px; width: 280px; background: var(--paper); border-radius: 10px;
   box-shadow: 0 6px 24px rgba(0, 10, 40, .35); overflow: hidden; z-index: 2;
 }
-#card h2 { margin: 0; padding: 14px 40px 12px 16px; background: var(--tfl-blue); color: #fff; font-size: 22px; font-weight: 500; line-height: 1.15; }
+#card h2 { margin: 0; background: var(--tfl-blue); font-size: 22px; font-weight: 500; line-height: 1.15; }
+#card .fold {
+  display: flex; align-items: center; gap: 6px; width: 100%; border: 0; background: none; color: #fff; font: inherit; text-align: left;
+  padding: 14px 40px 12px 16px; cursor: pointer;
+}
+#card .fold span { flex: 1; }
+#card .fold svg { flex: none; opacity: .8; transition: transform .2s; }
+#card.folded .fold svg { transform: rotate(180deg); }
 #card .close { position: absolute; right: 6px; top: 8px; color: #fff; }
 #card p { margin: 10px 16px 6px; font-size: 14px; color: var(--muted); }
 #card ul { list-style: none; margin: 0; padding: 0 16px 14px; display: grid; gap: 3px; }
@@ -96,7 +113,21 @@ section { padding: 10px 14px; border-bottom: 1px solid var(--rule); }
 #card-times ol button { border: 0; background: none; padding: 0; font: inherit; color: var(--tfl-blue); cursor: pointer; text-align: left; }
 #card-times ol button:hover { text-decoration: underline; }
 #card-times ol span { color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
-#card .times .hint { margin: 8px 0 0; font-size: 12.5px; }
+#card .times .hint { margin: 6px 0 0; font-size: 12.5px; }
+.about summary { display: flex; align-items: center; gap: 6px; margin-top: 8px; font-size: 13px; color: var(--muted); cursor: pointer; list-style: none; }
+.about summary::-webkit-details-marker { display: none; }
+
+/* folded card: just the nameboard and the journey-time bands as a colour strip with station counts */
+#card.folded :is(#card-zone, #card-lines, .times h3, .about, #card-times ol, #card-times small) { display: none; }
+#card-times small { font-size: inherit; }
+#card.folded .times { border-top: 0; padding: 8px 10px 10px; }
+#card.folded #card-times { display: flex; gap: 2px; }
+#card.folded #card-times > li { flex: 1; min-width: 0; border: 0; border-radius: 3px; background: var(--c); color: #fff; }
+#card.folded #card-times > li.light { color: var(--ink); }
+#card.folded #card-times summary { flex-direction: column; align-items: flex-start; gap: 0; padding: 3px 6px 4px; line-height: 1.2; }
+#card.folded #card-times summary i { display: none; }
+#card.folded #card-times summary b { order: -1; font-size: 14px; }
+#card.folded #card-times summary span { font-size: 10.5px; white-space: nowrap; }
 
 /* reachable-area hover: journey time under the cursor */
 #tip {
@@ -117,8 +148,43 @@ section { padding: 10px 14px; border-bottom: 1px solid var(--rule); }
 #loading.error { background: #DA291C; }
 
 @media (max-width: 640px) {
-  #panel { top: auto; bottom: 0; left: 0; right: 0; width: auto; max-height: 55%; border-radius: 12px 12px 0 0; }
-  #card { left: 16px; right: 16px; width: auto; top: 44px; } /* clear the attribution, which sits top-right on phones */
+  #panel { top: auto; bottom: 0; left: 0; right: 0; width: auto; max-height: 60%; border-radius: 12px 12px 0 0; }
+  .brand { gap: 8px; padding: 7px 8px 7px 12px; }
+  .brand h1 { font-size: 15px; }
+  .mark { width: 22px; height: 22px; border-radius: 6px; }
+  /* a bottom sheet: the chevron points up to open it and down to close it */
+  #panel #collapse svg { transform: rotate(180deg); }
+  #panel.collapsed #collapse svg { transform: none; }
+  section { padding: 8px 12px; }
+  .switch { gap: 8px; font-size: 13.5px; }
+  .switch input { width: 30px; height: 18px; }
+  .switch input::after { width: 12px; height: 12px; }
+  .switch input:checked::after { transform: translateX(12px); }
+  .toggles { grid-template-columns: 1fr 1fr; gap: 8px; }
+  .search label { font-size: 13px; }
+  .search input { font-size: 16px; padding: 6px 9px; } /* under 16px, iOS zooms in on focus */
+  .mode { padding: 0 12px; }
+  .mode summary { padding: 8px 64px 8px 0; }
+  .mode h2 { font-size: 13.5px; }
+  .mode .all { top: 6px; font-size: 12px; }
+  .bar { font-size: 12.5px; padding: 2px 8px; }
+  .mode.rail .bar { font-size: 12px; }
+  .note { margin: 8px 12px 0; font-size: 11.5px; }
+
+  #card { left: 10px; right: 10px; width: auto; top: 44px; max-height: calc(100% - 44px - 52px); } /* clear the attribution above and the layers bar below */
+  #card h2 { font-size: 17px; }
+  #card .fold { padding: 10px 40px 9px 12px; }
+  #card .close { top: 4px; }
+  #card p { margin: 8px 12px 4px; font-size: 12.5px; }
+  #card ul { padding: 0 12px 10px; }
+  #card #card-lines { display: flex; flex-wrap: wrap; }
+  #card li { padding: 1px 8px; font-size: 12.5px; }
+  #card .times { padding: 8px 12px 10px; }
+  #card .times h3 { font-size: 13.5px; margin-bottom: 2px; }
+  #card-times summary { padding: 5px 2px; font-size: 13px; }
+  #card #card-times ol li { font-size: 12.5px; }
+  #card .times .hint, .about summary { font-size: 11.5px; }
+  #tip { font-size: 13px; }
   /* the panel covers the bottom on phones: attribution moves to the top, zoom buttons go (pinch instead) */
   .maplibregl-ctrl-bottom-right { top: 0; bottom: auto; }
   .maplibregl-ctrl-group { display: none; }

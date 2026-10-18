@@ -14,6 +14,29 @@ const fc = (features) => ({ type: 'FeatureCollection', features });
 const pt = (coordinates, properties) => ({ type: 'Feature', properties, geometry: { type: 'Point', coordinates } });
 const FONT = ['Noto Sans Regular']; // map text can only use the tile server's glyphs
 
+// Phones get one sheet open at a time: opening the layers folds the card, unfolding the card closes the layers.
+// Wired before the data loads so the layers sheet never flashes open on a phone.
+const phone = matchMedia('(max-width: 640px)').matches;
+function setPanel(open) {
+  $('panel').classList.toggle('collapsed', !open);
+  $('collapse').setAttribute('aria-expanded', String(open));
+  $('collapse').title = open ? 'Hide layers' : 'Show layers';
+  if (open && phone && !$('card').hidden) foldCard(true);
+}
+function foldCard(folded) {
+  $('card').classList.toggle('folded', folded);
+  $('card-fold').setAttribute('aria-expanded', String(!folded));
+  $('card-fold').title = folded ? 'Show details' : 'Hide details';
+  if (!folded && phone) setPanel(false);
+}
+$('panel').querySelector('.brand').addEventListener('click', () => setPanel($('panel').classList.contains('collapsed')));
+$('card-fold').addEventListener('click', () => foldCard(!$('card').classList.contains('folded')));
+$('card-times').addEventListener('click', () => $('card').classList.contains('folded') && foldCard(false)); // a tap on the strip opens that band
+if (phone) {
+  setPanel(false);
+  $('card').querySelector('.about').open = false;
+}
+
 const map = new maplibregl.Map({
   container: 'map', style: 'https://tiles.openfreemap.org/styles/positron',
   center: [-0.118, 51.48], zoom: 10.3, pitch: 45, bearing: 0, maxPitch: 70, attributionControl: { compact: true },
@@ -231,12 +254,6 @@ on('t-buildings', (v) => {
       'fill-extrusion-base': ['get', 'render_min_height'], 'fill-extrusion-opacity': 0.85 } }, 'zones-fill');
 });
 
-$('collapse').addEventListener('click', () => {
-  const c = $('panel').classList.toggle('collapsed');
-  $('collapse').setAttribute('aria-expanded', String(!c));
-  $('collapse').title = c ? 'Show layers' : 'Hide layers';
-});
-
 // key: one bar per line, grouped by mode
 const key = $('key');
 for (const [mode, label] of Object.entries(MODES)) {
@@ -244,7 +261,8 @@ for (const [mode, label] of Object.entries(MODES)) {
   if (!group.length) continue;
   const sec = document.createElement('section');
   sec.className = 'mode' + (mode === 'national-rail' ? ' rail' : '');
-  sec.innerHTML = `<div class="mode-head"><h2>${label}</h2>${group.length > 1 ? '<button type="button">Hide all</button>' : ''}</div>`;
+  sec.innerHTML = `<details${phone ? '' : ' open'}><summary><h2>${label}</h2><span class="swatches">${group.map((l) => `<i style="--c:${l.colour}"></i>`).join('')}</span></summary></details>`
+    + (group.length > 1 ? '<button type="button" class="all">Hide all</button>' : '');
   const bars = group.map((l) => {
     const b = document.createElement('button');
     b.type = 'button';
@@ -253,10 +271,10 @@ for (const [mode, label] of Object.entries(MODES)) {
     b.textContent = l.name;
     b.setAttribute('aria-pressed', 'true');
     b.onclick = () => setLine(l.id, b, b.getAttribute('aria-pressed') !== 'true');
-    sec.appendChild(b);
+    sec.firstChild.appendChild(b);
     return [l.id, b];
   });
-  const all = sec.querySelector('.mode-head button');
+  const all = sec.querySelector('.all');
   if (all) all.onclick = () => {
     const show = all.textContent === 'Show all';
     bars.forEach(([id, b]) => setLine(id, b, show));
@@ -352,6 +370,7 @@ function selectStation(st, fly = false) {
     if (plannedOn) for (const p of plannedByStation.get(st.id) || []) $('card-lines').append(...p.lines.map(plannedChip));
   }
   $('card-planned-hint').hidden = !plannedOn;
+  if ($('card').hidden) foldCard(false); // a fresh card opens unfolded; one already showing keeps its fold
   $('card').hidden = false;
   if (fly) flyTo(st);
 
@@ -373,7 +392,9 @@ function selectStation(st, fly = false) {
     const list = groups[b].sort((x, y) => x[0] - y[0]);
     const prev = b ? BANDS[b - 1].max : 0;
     const li = document.createElement('li');
-    li.innerHTML = `<details><summary><i style="--c:${band.colour}"></i><span>${prev ? `${prev}–${band.max}` : `Under ${band.max}`} min</span><b>${list.length}</b></summary><ol></ol></details>`;
+    li.style.setProperty('--c', band.colour); // the dot, and the strip segment when the card is folded
+    if (isLight(band.colour)) li.className = 'light';
+    li.innerHTML = `<details><summary><i></i><span>${prev ? `${prev}–${band.max}` : `Under ${band.max}`}<small> min</small></span><b>${list.length}</b></summary><ol></ol></details>`;
     li.querySelector('ol').append(...list.map(([t, s]) => {
       const o = document.createElement('li');
       o.innerHTML = '<button type="button"></button><span></span>';
@@ -433,7 +454,7 @@ for (const st of planned.stations) if (!st.existing && !byName.has(st.name)) byN
 $('station-list').append(...[...byName.keys()].sort().map((n) => Object.assign(document.createElement('option'), { value: n })));
 $('station-search').addEventListener('change', (e) => {
   const st = byName.get(e.target.value.trim());
-  if (st && (plannedOn || !st.planned || st.existing)) { selectStation(st, true); e.target.blur(); }
+  if (st && (plannedOn || !st.planned || st.existing)) { selectStation(st, true); foldCard(false); e.target.blur(); }
 });
 
 $('loading').classList.add('done');
